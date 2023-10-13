@@ -1,6 +1,10 @@
 # esp32-ftms-server-reebok-57e
 
-This is an ESP32 based bluetooth metrics server for my Reebok 5.7e indoor exercise bike. It measures the flywheel rotation rate and resistance from the exercise bike. Converts the raw measurements into key metrics such as cadence, speed, distance and power. Creates a [Bluetooth Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server than can be connected to by any monitoring device which support this protocol e.g. Apple Watch running watchOS 10 or later.
+This is an ESP32 based bluetooth metrics server for a Reebok 5.7e indoor exercise bike. It does the following:
+
+1. Measures the flywheel rotation rate and resistance from the exercise bike.
+2. Converts the raw measurements into key metrics such as cadence, speed, distance and power.
+3. Creates a [Bluetooth Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server than can be connected to by a monitoring device which support this protocol e.g. Apple Watch running watchOS 10 or later.
 
 Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS BLE service.
 
