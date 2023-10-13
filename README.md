@@ -15,19 +15,19 @@ Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth
 3. Compile unedited code
 
 ### Todo
-3. Test flash unedited code to ESP32
-4. Test connect ESP32 to monitoring device
-5. Update code for specific hardware identities
-6. Update code to report synthetic dynamic key metrics
-7. Investigate bike hardware
-8. Identify sensor source for rotation
-9. Identify sensor source for resistance
-10. Access direct rotation sensor tap, bike-computer interface sniff or additional external sensor
-11. Create prototype interface circuit between rotation sensor and microcontroller input
-12. Update code to report key rotation based metrics
-13. Access direct resistance sensor tap, bike-computer interface sniff or additional external sensor
-14. Create prototype interface circuit between resistance sensor and microcontroller input
-15. Update code to report key rotation and resistance based metrics
-16. Assess MCU power source from exercise bike computer
-17. Assess power on/off with bike computer
-18. Implement standby/disconnect on idle (robust power down)
+1. Test flash unedited code to ESP32
+1. Test connect ESP32 to monitoring device
+1. Update code for specific hardware identities
+1. Update code to report synthetic dynamic key metrics
+1. Investigate bike hardware
+1. Identify sensor source for rotation
+1. Identify sensor source for resistance
+1. Access direct rotation sensor tap, bike-computer interface sniff or additional external sensor
+1. Create prototype interface circuit between rotation sensor and microcontroller input
+1. Update code to report key rotation based metrics
+1. Access direct resistance sensor tap, bike-computer interface sniff or additional external sensor
+1. Create prototype interface circuit between resistance sensor and microcontroller input
+1. Update code to report key rotation and resistance based metrics
+1. Assess MCU power source from exercise bike computer
+1. Assess power on/off with bike computer
+1. Implement standby/disconnect on idle (robust power down)
