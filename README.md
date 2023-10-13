@@ -10,7 +10,9 @@ Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth
 
 ## Roadmap
 ### Done
-1. Setup toolchain
+1. Setup toolchain [Arduino IDE v2.2.1 + esp32 (Espressif Systems) v2.0.11 / NodeMCU-32S]
+2. Update code header
+3. Compile unedited code
 
 ### Todo
 3. Test flash unedited code to ESP32
