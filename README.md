@@ -1,4 +1,4 @@
-# esp32-ftms-server-reebok-57e
+# FMTS Server Reebok 5.7e
 
 This is an ESP32 based bluetooth metrics server for a Reebok 5.7e indoor exercise bike. It does the following:
 
