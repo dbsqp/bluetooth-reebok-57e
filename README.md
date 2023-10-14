@@ -12,7 +12,7 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 The forked project uses [Bluetooth Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS BLE service. This service is currently not supported by targets the Apple Watch running watch of 10 or later as a monitoring device. Will create new branche to focus on Apple Watch use case.
 
 ## Status
-Unfinished/untested.
+Unfinished, untested and on-hold
 
 ## Roadmap
 ### Done
