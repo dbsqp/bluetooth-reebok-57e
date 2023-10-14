@@ -4,9 +4,12 @@ This is an ESP32 based bluetooth metrics server for a Reebok 5.7e indoor exercis
 
 1. Measures the flywheel rotation rate and resistance from the exercise bike.
 1. Converts the raw measurements into key metrics such as cadence, speed, distance and power.
-1. Creates a [Bluetooth Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server than can be connected to by a monitoring device.
+1. Creates a Bluetooth server than can be connected to by a monitoring device.
 
-Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS BLE service and targets the Apple Watch running watch of 10 or later as a monitoring device.
+The project targets the Apple Watch running watchOS 10 or later as a monitoring device.
+
+## Bluetooth Service
+The forked project uses [Bluetooth Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS BLE service. This service is currently not supported by targets the Apple Watch running watch of 10 or later as a monitoring device. Will create new branche to focus on Apple Watch use case.
 
 ## Roadmap
 ### Done
