@@ -24,6 +24,7 @@ Unfinished/untested.
 1. Update code for specific hardware identities
 
 ### Todo
+1. Code for Bluetooth Cycling Speed and Cadence Profile cf. FTMS
 1. Test connect ESP32 to monitoring device
 1. Update code to report synthetic dynamic key metrics
 1. Investigate bike hardware
