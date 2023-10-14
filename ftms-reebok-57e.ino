@@ -3,7 +3,7 @@
     Ported to Arduino ESP32 by Evandro Copercini
     updates by chegewara
     based on esp32-ftms-server by jamesjmtaylor
-    edits for Reebok 5.7e indore exercise bike by dbsqp
+    edited for Reebok 5.7e indoor exercise bike by dbsqp
 */
 
 #include <BLEDevice.h>
@@ -18,7 +18,7 @@
 #define FTMS_UUID "3bb4b74f-a246-47ba-937c-d266ab84f94d"
 #define FITNESS_MACHINE_FEATURES_UUID "95918664-d17e-41d3-b712-9c69fa2a41a6"
 #define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "9673d9af-2eba-4dca-a92c-d7ed607aef67"
-#define LED_BUILTIN 2
+#define LED_BUILTIN LED_BUILTIN
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -48,8 +48,8 @@ BLEServer *pServer = NULL;
 void setupBluetoothServer()
 {
     Serial.begin(115200);
-    Serial.println("Starting BLE work!");
-    BLEDevice::init("Reebok 5.7e");
+    Serial.println("Starting BLE!");
+    BLEDevice::init("Bike");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
     BLEService *pService = pServer->createService(FTMS_UUID);
@@ -69,7 +69,7 @@ void setupBluetoothServer()
     fitnessMachineFeaturesCharacteristic->addDescriptor(new BLE2902());
     indoorBikeDataCharacteristic->addDescriptor(new BLE2902());
     pService->start();
-    // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // add this for backwards compatibility
+    //BLEAdvertising *pAdvertising = pServer->getAdvertising();  // add this for backwards compatibility
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(FTMS_UUID);
     pAdvertising->setScanResponse(true);
@@ -80,13 +80,11 @@ void setupBluetoothServer()
 }
 
 int digitalPin = 18;
-int analogPin = 19;
 bool magStateOld;
 void setupHalSensor()
 {
-    pinMode(analogPin, INPUT);
     pinMode(digitalPin, INPUT);
-    Serial.begin(9600);
+    Serial.begin(115200);
     magStateOld = digitalRead(digitalPin);
 }
 
@@ -102,8 +100,7 @@ double calculateRpmFromRevolutions(int revolutions, unsigned long revolutionsTim
 {
     double ROAD_WHEEL_TO_TACH_WHEEL_RATIO = 20.68;
     double instantaneousRpm = revolutions * 60 * 1000 / revolutionsTime / ROAD_WHEEL_TO_TACH_WHEEL_RATIO;
-    //    Serial.printf("revolutionsTime: %d, rev: %d , instantaneousRpm: %2.9f \n",
-    //                    revolutionsTime, revolutions, instantaneousRpm);
+    // Serial.printf("revolutionsTime: %d, rev: %d , instantaneousRpm: %2.9f \n", revolutionsTime, revolutions, instantaneousRpm);
     return instantaneousRpm;
 }
 
@@ -115,9 +112,7 @@ double calculateKphFromRpm(double rpm)
     double circumfrence = 2 * PI * WHEEL_RADIUS;
     double metricDistance = rpm * circumfrence;
     double kph = metricDistance * 60;
-    double mph = kph * KM_TO_MI; 
-                                        //    Serial.printf("rpm: %2.2f, circumfrence: %2.2f, metricDistance %2.5f , imperialDistance: %2.5f, mph: %2.2f \n",
-                                        //                   rpm, circumfrence, metricDistance, imperialDistance, mph);
+    // Serial.printf("rpm: %2.2f, circumfrence: %2.2f, distance %2.5f , speed: %2.2f \n", rpm, circumfrence, metricDistance, kmh);
     return kph;
 }
 
@@ -125,8 +120,7 @@ unsigned long distanceTime = 0;
 double calculateDistanceFromKph(unsigned long distanceTimeSpan, double kph)
 {
     double incrementalDistance = distanceTimeSpan * kph / 60 / 60 / 1000;
-    //    Serial.printf("mph: %2.2f, distanceTimeSpan %d , incrementalDistance: %2.9f \n",
-    //                   mph, distanceTimeSpan, incrementalDistance);
+    // Serial.printf("kph: %2.2f, distanceTimeSpan %d , incrementalDistance: %2.9f \n", kph, distanceTimeSpan, incrementalDistance);
     return incrementalDistance;
 }
 
@@ -135,7 +129,6 @@ double aeroValues[] = {0.388, 0.445, 0.420, 0.300, 0.233, 0.200}; //Hoods, Barto
 unsigned long caloriesTime = 0;
 double calculatePowerFromKph(double kph)
 {
-    //double velocity = mph * 0.44704; // translates to meters/second
     double velocity = kph * 0.277778; // translates to meters/second
     double riderWeight = 72.6;       //165 lbs
     double bikeWeight = 11.1;        //Cannondale road bike
@@ -200,14 +193,14 @@ byte features[] = {0x07,0x52,0x00,0x00};
 void transmitFTMS(double rpm, double avgRpm, double kph, double avgKph, double power, double avgPower, 
                   double runningDistance, double runningCalories, unsigned long elapsedTime)
 {
-    uint16_t transmittedKph     = (uint16_t) (kph * 100);         //(0.01 resolution)
-    uint16_t transmittedTime    = (uint16_t) (elapsedTime / 1000);//(1.0 resolution) 
-    uint16_t transmittedAvgKph  = (uint16_t) (avgKph * 100);      //(0.01 resolution)
-    uint16_t transmittedRpm     = (uint16_t) (rpm * 2);           //(0.5 resolution)
-    uint16_t transmittedAvgRpm  = (uint16_t) (avgRpm * 2);         //(0.1 resolution)
-    uint16_t transmittedPower   = (uint16_t) (power * 2);      //(1.0 resolution)
-    uint16_t transmittedAvgPower= (uint16_t) (avgPower * 2);        //(1.0 resolution)
-    uint32_t transmittedDistance= (uint32_t) (runningDistance * 1000);// runningDistance in km, need m 
+    uint16_t transmittedKph     = (uint16_t) (kph * 100);                              //(0.01 resolution)
+    uint16_t transmittedTime    = (uint16_t) (elapsedTime / 1000);                     //(1.0 resolution) 
+    uint16_t transmittedAvgKph  = (uint16_t) (avgKph * 100);                           //(0.01 resolution)
+    uint16_t transmittedRpm     = (uint16_t) (rpm * 2);                                //(0.5 resolution)
+    uint16_t transmittedAvgRpm  = (uint16_t) (avgRpm * 2);                             //(0.1 resolution)
+    uint16_t transmittedPower   = (uint16_t) (power * 2);                              //(1.0 resolution)
+    uint16_t transmittedAvgPower= (uint16_t) (avgPower * 2);                           //(1.0 resolution)
+    uint32_t transmittedDistance= (uint32_t) (runningDistance * 1000);                 // runningDistance in km, need m 
     uint16_t transmittedTotalCal= (uint16_t) (runningCalories * 10);                   //(1.0 resolution)
     uint16_t transmittedCalHr   = (uint16_t) (runningCalories * 60 * 60 / elapsedTime);//(1.0 resolution) 
     uint8_t transmittedCalMin   = (uint8_t)  (runningCalories * 60 / elapsedTime);     //(1.0 resolution)
@@ -258,7 +251,7 @@ unsigned long elapsedSampleTime = 0;
 int rev = 0;
 double intervalEntries = 0;
 double totalRpm = 0;
-double totaKph = 0;
+double totalKph = 0;
 double totalPower = 0;
 double runningCalories = 0.0;
 double runningDistance = 0.0;
@@ -280,16 +273,16 @@ void loop()
         
         intervalEntries++;
         totalRpm += rpm;
-        totaKph += kph;
+        totalKph += kph;
         totalPower += power;
         
         double avgRpm   = totalRpm   / intervalEntries;
-        double avgKph   = totaKph    / intervalEntries;
+        double avgKph   = totalKph   / intervalEntries;
         double avgPower = totalPower / intervalEntries;
         runningDistance += calculateDistanceFromKph(intervalTime, kph);
         
         runningCalories += calculateCaloriesFromPower(intervalTime, power);
-        Serial.printf("T %6.1f  REV %3d RPM %5.2f - %5.2f  KPH %5.2f - %5.2f  PWR %5.2f - %5.2f  KM %5.2f  CAL %5.5f\n", elapsedTime/1000.0, rev, rpm, avgRpm, kph, avgKph, power, avgPower, runningDistance, runningCalories);
+        Serial.printf("SEC %6.1f  REV %3d  RPM %5.1f [ %5.1f ]  KPH %4.1f [ %4.1f ]  PWR %5.1f [ %5.1f ]  KM %4.1f  CAL %5.1f\n", elapsedTime/1000.0, rev, rpm, avgRpm, kph, avgKph, power, avgPower, runningDistance, runningCalories);
 
         indicateRpmWithLight(rpm);
         // bluetooth becomes congested if too many packets are sent. In a 6 hour test I was able to go as frequent as 3ms.
