@@ -14,11 +14,11 @@ Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth
 1. Update code header
 1. Compile unedited code
 1. Update readme
+1. Test flash unedited code to ESP32
+1. Update code for specific hardware identities
 
 ### Todo
-1. Test flash unedited code to ESP32
 1. Test connect ESP32 to monitoring device
-1. Update code for specific hardware identities
 1. Update code to report synthetic dynamic key metrics
 1. Investigate bike hardware
 1. Identify sensor source for rotation

@@ -15,9 +15,9 @@
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
-#define FTMS_UUID "00001826-0000-1000-8000-00805f9b34fb"
-#define FITNESS_MACHINE_FEATURES_UUID "00002acc-0000-1000-8000-00805f9b34fb"
-#define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "00002ad2-0000-1000-8000-00805f9b34fb"
+#define FTMS_UUID "3bb4b74f-a246-47ba-937c-d266ab84f94d"
+#define FITNESS_MACHINE_FEATURES_UUID "95918664-d17e-41d3-b712-9c69fa2a41a6"
+#define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "9673d9af-2eba-4dca-a92c-d7ed607aef67"
 #define LED_BUILTIN 2
 
 bool deviceConnected = false;
@@ -49,7 +49,7 @@ void setupBluetoothServer()
 {
     Serial.begin(115200);
     Serial.println("Starting BLE work!");
-    BLEDevice::init("IC Bike");
+    BLEDevice::init("Reebok 5.7e");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
     BLEService *pService = pServer->createService(FTMS_UUID);
@@ -289,12 +289,7 @@ void loop()
         runningDistance += calculateDistanceFromKph(intervalTime, kph);
         
         runningCalories += calculateCaloriesFromPower(intervalTime, power);
-        Serial.println("\n----------------------------------------------------");
-        Serial.printf("elapsedTime: %d, rev: %d \n", elapsedTime, rev);
-        Serial.printf("rpm: %2.2f, avgRpm: %2.2f \n", rpm, avgRpm);
-        Serial.printf("kph: %2.2f, avgKph: %2.2f \n", kph, avgKph);
-        Serial.printf("power: %2.2f watts, avgPower: %2.2 watts \n", power, avgPower);
-        Serial.printf("distance: %2.2f, calories:  %2.5f \n", runningDistance, runningCalories);
+        Serial.printf("T %6.1f  REV %3d RPM %5.2f - %5.2f  KPH %5.2f - %5.2f  PWR %5.2f - %5.2f  KM %5.2f  CAL %5.5f\n", elapsedTime/1000.0, rev, rpm, avgRpm, kph, avgKph, power, avgPower, runningDistance, runningCalories);
 
         indicateRpmWithLight(rpm);
         // bluetooth becomes congested if too many packets are sent. In a 6 hour test I was able to go as frequent as 3ms.
