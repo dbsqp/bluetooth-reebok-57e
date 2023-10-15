@@ -13,11 +13,22 @@
 #include <math.h>
 
 // See the following for generating UUIDs:
-// https://www.uuidgenerator.net/
+// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 
-#define FTMS_UUID "3bb4b74f-a246-47ba-937c-d266ab84f94d"
-#define FITNESS_MACHINE_FEATURES_UUID "95918664-d17e-41d3-b712-9c69fa2a41a6"
-#define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "9673d9af-2eba-4dca-a92c-d7ed607aef67"
+#define CSCS_NAME "Reebok 5.7e - Cadence"
+
+#define CSCS_UUID "00001816-0000-1000-8000-00805f9b34fb"
+#define CSC_FEATURES_UUID "00002A5C-0000-1000-8000-00805f9b34fb"
+#define CSC_MEASUREMENT_CHARACTERISTIC_UUID "00002A5B-0000-1000-8000-00805f9b34fb"
+
+#define CPS_UUID "00001818-0000-1000-8000-00805f9b34fb"
+#define CYCLING_POWER_FEATURES_UUID "00002A65-0000-1000-8000-00805f9b34fb"
+#define CYCLING_POWER_MEASUREMENT_CHARACTERISTIC_UUID "00002A63-0000-1000-8000-00805f9b34fb"
+
+#define FTMS_UUID "00001826-0000-1000-8000-00805f9b34fb"
+#define FITNESS_MACHINE_FEATURES_UUID "00002acc-0000-1000-8000-00805f9b34fb"
+#define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "00002ad2-0000-1000-8000-00805f9b34fb"
+
 #define LED_BUILTIN LED_BUILTIN
 
 bool deviceConnected = false;
@@ -38,46 +49,58 @@ class MyServerCallbacks : public BLEServerCallbacks
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT); // initialize digital pin LED_BUILTIN as an output.
-    setupBluetoothServer();
+    setupBluetoothServerCSC();
     setupHalSensor();
 }
 
-BLECharacteristic *fitnessMachineFeaturesCharacteristic = NULL;
-BLECharacteristic *indoorBikeDataCharacteristic = NULL;
+
+
 BLEServer *pServer = NULL;
-void setupBluetoothServer()
+
+BLECharacteristic *cyclingSpeedAndCadanceCharacteristic = NULL;
+BLECharacteristic *cscMeasurementCharacteristic = NULL;
+void setupBluetoothServerCSC()
 {
     Serial.begin(115200);
-    Serial.println("Starting BLE!");
-    BLEDevice::init("Bike");
+    Serial.println("Starting CSCS!");
+    Serial.println("Device: "CSCS_NAME);
+    BLEDevice::init(CSCS_NAME);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
-    BLEService *pService = pServer->createService(FTMS_UUID);
-    fitnessMachineFeaturesCharacteristic = pService->createCharacteristic(
-        FITNESS_MACHINE_FEATURES_UUID,
+    BLEService *pService = pServer->createService(CSCS_UUID);
+    cyclingSpeedAndCadanceCharacteristic = pService->createCharacteristic(
+        CSC_FEATURES_UUID,
         BLECharacteristic::PROPERTY_READ |
             BLECharacteristic::PROPERTY_WRITE |
             BLECharacteristic::PROPERTY_NOTIFY |
             BLECharacteristic::PROPERTY_INDICATE);
-    indoorBikeDataCharacteristic = pService->createCharacteristic(
-        INDOOR_BIKE_DATA_CHARACTERISTIC_UUID,
+    cscMeasurementCharacteristic = pService->createCharacteristic(
+        CSC_MEASUREMENT_CHARACTERISTIC_UUID,
         BLECharacteristic::PROPERTY_READ |
             BLECharacteristic::PROPERTY_WRITE |
             BLECharacteristic::PROPERTY_NOTIFY |
             BLECharacteristic::PROPERTY_INDICATE);
     //  BLE2803 and BLE2902 are the UUIDs for Characteristic Declaration (0x2803) and Descriptor Declaration (0x2902).
-    fitnessMachineFeaturesCharacteristic->addDescriptor(new BLE2902());
-    indoorBikeDataCharacteristic->addDescriptor(new BLE2902());
+    cyclingSpeedAndCadanceCharacteristic->addDescriptor(new BLE2902());
+    cscMeasurementCharacteristic->addDescriptor(new BLE2902());
     pService->start();
-    //BLEAdvertising *pAdvertising = pServer->getAdvertising();  // add this for backwards compatibility
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(FTMS_UUID);
+    pAdvertising->addServiceUUID(CSCS_UUID);
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06); // functions that help with iPhone connections issue
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
-    Serial.println("Waiting for a client connection to notify...");
+    Serial.println("Waiting for client to connect...");
 }
+
+
+
+
+
+
+
+
+
 
 int digitalPin = 18;
 bool magStateOld;
@@ -165,13 +188,10 @@ double calculateCaloriesFromPower(unsigned long caloriesTimeSpan, double powerv)
 
 void indicateRpmWithLight(int rpm)
 {
-    if (rpm > 1)
-    {
-        digitalWrite(LED_BUILTIN, HIGH); // turn the LED on (HIGH is the voltage level)
-    }
-    else
-    {
-        digitalWrite(LED_BUILTIN, LOW); // turn the LED off by making the voltage LOW
+    if (rpm > 1) {
+        digitalWrite(LED_BUILTIN, HIGH); // turn on LED
+    } else {
+        digitalWrite(LED_BUILTIN, LOW);  // turn off LED
     }
 }
 
@@ -187,74 +207,129 @@ void printArray(byte input[], int sizeOfArray)
     }
 }
 
-byte features[] = {0x07,0x52,0x00,0x00}; 
-// 0x07,0x52 (0x48,0x4a in big-endian) are flags for
-// avgSpeed (0), cadence (1), total distance (2), expended energy (9), elapsed time (12), power measurement (14)  
-void transmitFTMS(double rpm, double avgRpm, double kph, double avgKph, double power, double avgPower, 
-                  double runningDistance, double runningCalories, unsigned long elapsedTime)
+
+
+
+
+
+
+
+
+
+//  byte features[] = {0x07,0x52,0x00,0x00}; 
+// // 0x07,0x52 (0x48,0x4a in big-endian) are flags for
+// // avgSpeed (0), cadence (1), total distance (2), expended energy (9), elapsed time (12), power measurement (14)  
+// void transmitFTMS(double rpm, double avgRpm, double kph, double avgKph, double power, double avgPower, 
+//                   double runningDistance, double runningCalories, unsigned long elapsedTime)
+// {
+//     uint16_t transmittedKph     = (uint16_t) (kph * 100);                              //(0.01 resolution)
+//     uint16_t transmittedTime    = (uint16_t) (elapsedTime / 1000);                     //(1.0 resolution) 
+//     uint16_t transmittedAvgKph  = (uint16_t) (avgKph * 100);                           //(0.01 resolution)
+//     uint16_t transmittedRpm     = (uint16_t) (rpm * 2);                                //(0.5 resolution)
+//     uint16_t transmittedAvgRpm  = (uint16_t) (avgRpm * 2);                             //(0.1 resolution)
+//     uint16_t transmittedPower   = (uint16_t) (power * 2);                              //(1.0 resolution)
+//     uint16_t transmittedAvgPower= (uint16_t) (avgPower * 2);                           //(1.0 resolution)
+//     uint32_t transmittedDistance= (uint32_t) (runningDistance * 1000);                 // runningDistance in km, need m 
+//     uint16_t transmittedTotalCal= (uint16_t) (runningCalories * 10);                   //(1.0 resolution)
+//     uint16_t transmittedCalHr   = (uint16_t) (runningCalories * 60 * 60 / elapsedTime);//(1.0 resolution) 
+//     uint8_t transmittedCalMin   = (uint8_t)  (runningCalories * 60 / elapsedTime);     //(1.0 resolution)
+    
+//     bool disconnecting = !deviceConnected && oldDeviceConnected;
+//     bool connecting = deviceConnected && !oldDeviceConnected;
+    
+//     byte bikeData[20]={0x56,0x09, // these bytes are the flags for
+//                     // instSpeed (0 counts as true here), avgSpeed(1), instCadence (2),  
+//                     // total distance (4), instPower (6), expended energy (8), elapsed time (11)
+//                     (uint8_t)transmittedKph,       (uint8_t)(transmittedKph >> 8),
+//                     (uint8_t)transmittedAvgKph,    (uint8_t)(transmittedAvgKph >> 8),
+//                     (uint8_t)transmittedRpm,       (uint8_t)(transmittedRpm >> 8),
+//                     //(uint8_t)transmittedAvgRpm,    (uint8_t)(transmittedAvgRpm >> 8), //NOTE: commented out to avoid exceeding MTU                   
+//                     (uint8_t)transmittedDistance,  (uint8_t)(transmittedDistance >> 8),(uint8_t)(transmittedDistance >> 16),        
+//                     (uint8_t)transmittedPower,     (uint8_t)(transmittedPower >> 8), //NOTE: Actually SINT16, but my bike can't peddle backwards
+//                     //(uint8_t)transmittedAvgPower,(uint8_t)(transmittedAvgPower >> 8), //NOTE: commented out to avoid exceeding MTU                        
+//                     (uint8_t)transmittedTotalCal,  (uint8_t)(transmittedTotalCal >> 8),                    
+//                     (uint8_t)transmittedCalHr,     (uint8_t)(transmittedCalHr >> 8),                    
+//                     transmittedCalMin,
+//                     (uint8_t)transmittedTime,      (uint8_t)(transmittedTime >> 8)
+//       };
+//     if (deviceConnected)
+//     {
+//         //NOTE: Even though the ATT_MTU for BLE is 23 bytes, android by default only captures the first 20 bytes.
+//         indoorBikeDataCharacteristic->setValue((uint8_t *)&bikeData, 20);
+//         indoorBikeDataCharacteristic->notify();
+//     }
+    
+//     if (disconnecting) // give the bluetooth stack the chance to get things ready & restart advertising
+//     {
+//         delay(500);                  
+//         pServer->startAdvertising(); 
+//         Serial.println("start advertising");
+//         oldDeviceConnected = deviceConnected;
+//     }
+    
+//     if (connecting) // execute one time notification of supported features
+//     { 
+//         oldDeviceConnected = deviceConnected;
+//         fitnessMachineFeaturesCharacteristic->setValue((byte*)&features, 4);
+//         fitnessMachineFeaturesCharacteristic->notify();
+//     }
+// }
+
+
+
+
+
+byte features[] = {0x02,0x00,0x00,0x00}; 
+// feature [bit]: cadence (1) 
+void transmitCSC(double cadence)
 {
-    uint16_t transmittedKph     = (uint16_t) (kph * 100);                              //(0.01 resolution)
-    uint16_t transmittedTime    = (uint16_t) (elapsedTime / 1000);                     //(1.0 resolution) 
-    uint16_t transmittedAvgKph  = (uint16_t) (avgKph * 100);                           //(0.01 resolution)
-    uint16_t transmittedRpm     = (uint16_t) (rpm * 2);                                //(0.5 resolution)
-    uint16_t transmittedAvgRpm  = (uint16_t) (avgRpm * 2);                             //(0.1 resolution)
-    uint16_t transmittedPower   = (uint16_t) (power * 2);                              //(1.0 resolution)
-    uint16_t transmittedAvgPower= (uint16_t) (avgPower * 2);                           //(1.0 resolution)
-    uint32_t transmittedDistance= (uint32_t) (runningDistance * 1000);                 // runningDistance in km, need m 
-    uint16_t transmittedTotalCal= (uint16_t) (runningCalories * 10);                   //(1.0 resolution)
-    uint16_t transmittedCalHr   = (uint16_t) (runningCalories * 60 * 60 / elapsedTime);//(1.0 resolution) 
-    uint8_t transmittedCalMin   = (uint8_t)  (runningCalories * 60 / elapsedTime);     //(1.0 resolution)
+    uint16_t transmittedCadence   = (uint16_t) (cadence * 2);                                //(0.5 resolution)
     
     bool disconnecting = !deviceConnected && oldDeviceConnected;
     bool connecting = deviceConnected && !oldDeviceConnected;
     
-    byte bikeData[20]={0x56,0x09, // these bytes are the flags for
-                    // instSpeed (0 counts as true here), avgSpeed(1), instCadence (2),  
-                    // total distance (4), instPower (6), expended energy (8), elapsed time (11)
-                    (uint8_t)transmittedKph,       (uint8_t)(transmittedKph >> 8),
-                    (uint8_t)transmittedAvgKph,    (uint8_t)(transmittedAvgKph >> 8),
-                    (uint8_t)transmittedRpm,       (uint8_t)(transmittedRpm >> 8),
-                    //(uint8_t)transmittedAvgRpm,    (uint8_t)(transmittedAvgRpm >> 8), //NOTE: commented out to avoid exceeding MTU                   
-                    (uint8_t)transmittedDistance,  (uint8_t)(transmittedDistance >> 8),(uint8_t)(transmittedDistance >> 16),        
-                    (uint8_t)transmittedPower,     (uint8_t)(transmittedPower >> 8), //NOTE: Actually SINT16, but my bike can't peddle backwards
-                    //(uint8_t)transmittedAvgPower,(uint8_t)(transmittedAvgPower >> 8), //NOTE: commented out to avoid exceeding MTU                        
-                    (uint8_t)transmittedTotalCal,  (uint8_t)(transmittedTotalCal >> 8),                    
-                    (uint8_t)transmittedCalHr,     (uint8_t)(transmittedCalHr >> 8),                    
-                    transmittedCalMin,
-                    (uint8_t)transmittedTime,      (uint8_t)(transmittedTime >> 8)
+    byte bikeData[20]={0x02,0x00, // these bytes are the flags for
+                    // cadence (1)   
+                    (uint8_t)transmittedCadence,       (uint8_t)(transmittedCadence >> 8),
       };
     if (deviceConnected)
     {
         //NOTE: Even though the ATT_MTU for BLE is 23 bytes, android by default only captures the first 20 bytes.
-        indoorBikeDataCharacteristic->setValue((uint8_t *)&bikeData, 20);
-        indoorBikeDataCharacteristic->notify();
+        cscMeasurementCharacteristic->setValue((uint8_t *)&bikeData, 20);
+        cscMeasurementCharacteristic->notify();
     }
     
     if (disconnecting) // give the bluetooth stack the chance to get things ready & restart advertising
     {
+        Serial.println("disconnecting...");
         delay(500);                  
         pServer->startAdvertising(); 
-        Serial.println("start advertising");
+        Serial.println("start advertising...");
         oldDeviceConnected = deviceConnected;
     }
     
     if (connecting) // execute one time notification of supported features
     { 
+        Serial.println("connecting...");
         oldDeviceConnected = deviceConnected;
-        fitnessMachineFeaturesCharacteristic->setValue((byte*)&features, 4);
-        fitnessMachineFeaturesCharacteristic->notify();
+        cyclingSpeedAndCadanceCharacteristic->setValue((byte*)&features, 4);
+        cyclingSpeedAndCadanceCharacteristic->notify();
     }
 }
+
+
+
+
+
+
+
+
+
 
 unsigned long elapsedTime = 0;
 unsigned long elapsedSampleTime = 0;
 int rev = 0;
 double intervalEntries = 0;
-double totalRpm = 0;
-double totalKph = 0;
-double totalPower = 0;
-double runningCalories = 0.0;
-double runningDistance = 0.0;
 void loop()
 {
     unsigned long intervalTime = millis() - elapsedTime;
@@ -267,26 +342,21 @@ void loop()
     }
     if (intervalTime > 500)
     {
-        double rpm = calculateRpmFromRevolutions(rev, intervalTime);
-        double kph = calculateKphFromRpm(rpm);
-        double power = calculatePowerFromKph(kph);
+        //double rpm = calculateRpmFromRevolutions(rev, intervalTime);
+        //double kph = calculateKphFromRpm(rpm);
+        //double power = calculatePowerFromKph(kph);
         
         intervalEntries++;
-        totalRpm += rpm;
-        totalKph += kph;
-        totalPower += power;
-        
-        double avgRpm   = totalRpm   / intervalEntries;
-        double avgKph   = totalKph   / intervalEntries;
-        double avgPower = totalPower / intervalEntries;
-        runningDistance += calculateDistanceFromKph(intervalTime, kph);
-        
-        runningCalories += calculateCaloriesFromPower(intervalTime, power);
-        Serial.printf("SEC %6.1f  REV %3d  RPM %5.1f [ %5.1f ]  KPH %4.1f [ %4.1f ]  PWR %5.1f [ %5.1f ]  KM %4.1f  CAL %5.1f\n", elapsedTime/1000.0, rev, rpm, avgRpm, kph, avgKph, power, avgPower, runningDistance, runningCalories);
 
-        indicateRpmWithLight(rpm);
-        // bluetooth becomes congested if too many packets are sent. In a 6 hour test I was able to go as frequent as 3ms.
-        transmitFTMS(rpm,avgRpm,kph,avgKph,power,avgPower,runningDistance,runningCalories,elapsedTime);
+        // synthetic oscilating readings
+        double rev = 80+10*sin(2.0*3.14159*elapsedTime/100.0);
+        double rpm = 2.0*rev;
+
+        Serial.printf("SEC %6.1f  RPM %5.1f REV %4.1f\n", elapsedTime/1000.0, rpm, rev);
+
+        indicateRpmWithLight(rev);
+
+        transmitCSC(rev);
 
         rev = 0;
         elapsedTime = millis();
