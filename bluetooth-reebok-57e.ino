@@ -12,353 +12,321 @@
 #include <BLE2902.h>
 #include <math.h>
 
-// See the following for generating UUIDs:
-// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 
-#define CSCS_NAME "Reebok 5.7e - Cadence"
 
-#define CSCS_UUID "00001816-0000-1000-8000-00805f9b34fb"
-#define CSC_FEATURES_UUID "00002A5C-0000-1000-8000-00805f9b34fb"
-#define CSC_MEASUREMENT_CHARACTERISTIC_UUID "00002A5B-0000-1000-8000-00805f9b34fb"
+// globals
+BLEServer *pServer;
 
-#define CPS_UUID "00001818-0000-1000-8000-00805f9b34fb"
-#define CYCLING_POWER_FEATURES_UUID "00002A65-0000-1000-8000-00805f9b34fb"
-#define CYCLING_POWER_MEASUREMENT_CHARACTERISTIC_UUID "00002A63-0000-1000-8000-00805f9b34fb"
+uint16_t crankrev;  // Cadence RPM
+uint16_t lastcrank; // Last crank time
+uint32_t wheelrev;  // Wheel revolutions
+uint16_t lastwheel; // Last crank time
+uint16_t cadence;
 
-#define FTMS_UUID "00001826-0000-1000-8000-00805f9b34fb"
-#define FITNESS_MACHINE_FEATURES_UUID "00002acc-0000-1000-8000-00805f9b34fb"
-#define INDOOR_BIKE_DATA_CHARACTERISTIC_UUID "00002ad2-0000-1000-8000-00805f9b34fb"
+unsigned long elapsedTime;
+unsigned long elapsedSampleTime;
+int rev;
+double intervalEntries;
 
-#define LED_BUILTIN LED_BUILTIN
+byte cscMeasurement[11] = { 0b00000011, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+byte cscFeature[1] = { 0b0000000000000010 };
+byte sensorLocation[1] = { 6 };
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-class MyServerCallbacks : public BLEServerCallbacks
-{
-    void onConnect(BLEServer *pServer)
-    {
-        deviceConnected = true;
-    };
-
-    void onDisconnect(BLEServer *pServer)
-    {
-        deviceConnected = false;
-    }
-};
-
-void setup()
-{
-    pinMode(LED_BUILTIN, OUTPUT); // initialize digital pin LED_BUILTIN as an output.
-    setupBluetoothServerCSC();
-    setupHalSensor();
-}
-
-
-
-BLEServer *pServer = NULL;
-
-BLECharacteristic *cyclingSpeedAndCadanceCharacteristic = NULL;
-BLECharacteristic *cscMeasurementCharacteristic = NULL;
-void setupBluetoothServerCSC()
-{
-    Serial.begin(115200);
-    Serial.println("Starting CSCS!");
-    Serial.println("Device: "CSCS_NAME);
-    BLEDevice::init(CSCS_NAME);
-    pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks());
-    BLEService *pService = pServer->createService(CSCS_UUID);
-    cyclingSpeedAndCadanceCharacteristic = pService->createCharacteristic(
-        CSC_FEATURES_UUID,
-        BLECharacteristic::PROPERTY_READ |
-            BLECharacteristic::PROPERTY_WRITE |
-            BLECharacteristic::PROPERTY_NOTIFY |
-            BLECharacteristic::PROPERTY_INDICATE);
-    cscMeasurementCharacteristic = pService->createCharacteristic(
-        CSC_MEASUREMENT_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ |
-            BLECharacteristic::PROPERTY_WRITE |
-            BLECharacteristic::PROPERTY_NOTIFY |
-            BLECharacteristic::PROPERTY_INDICATE);
-    //  BLE2803 and BLE2902 are the UUIDs for Characteristic Declaration (0x2803) and Descriptor Declaration (0x2902).
-    cyclingSpeedAndCadanceCharacteristic->addDescriptor(new BLE2902());
-    cscMeasurementCharacteristic->addDescriptor(new BLE2902());
-    pService->start();
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(CSCS_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06); // functions that help with iPhone connections issue
-    pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
-    Serial.println("Waiting for client to connect...");
-}
-
-
-
-
-
-
-
-
-
+bool magStateOld;
 
 int digitalPin = 18;
-bool magStateOld;
-void setupHalSensor()
-{
-    pinMode(digitalPin, INPUT);
-    Serial.begin(115200);
-    magStateOld = digitalRead(digitalPin);
+
+#define LED_BUILTIN LED_BUILTIN
+
+#define SERVER_NAME "Reebok 5.7e Bike"
+
+// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
+#define CSC_SERVICE_UUID BLEUUID ((uint16_t) 0x1816)
+
+BLECharacteristic cscMeasurementCharacteristics( BLEUUID ((uint16_t) 0x2A5B), BLECharacteristic::PROPERTY_NOTIFY); // Measurement Characteristic
+BLECharacteristic cscFeatureCharacteristics(     BLEUUID ((uint16_t) 0x2A5C), BLECharacteristic::PROPERTY_READ);   // Feature Characteristic
+BLECharacteristic sensorLocationCharacteristics( BLEUUID ((uint16_t) 0x2A5D), BLECharacteristic::PROPERTY_READ);   // Sensor Location Characteristic
+BLECharacteristic scControlPointCharacteristics( BLEUUID ((uint16_t) 0x2A55), BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_INDICATE); // SC Control Point Characteristic  
+
+//0x2901 is a custom user description
+BLEDescriptor cscMeasurementDescriptor( BLEUUID ((uint16_t) 0x2901));
+BLEDescriptor cscFeatureDescriptor(     BLEUUID ((uint16_t) 0x2901));
+BLEDescriptor sensorLocationDescriptor( BLEUUID ((uint16_t) 0x2901));
+BLEDescriptor scControlPointDescriptor( BLEUUID ((uint16_t) 0x2901));
+
+
+
+// connection status
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *pServer) {
+    deviceConnected = true;
+  };
+
+  void onDisconnect(BLEServer *pServer) {
+    deviceConnected = false;
+  }
+};
+
+
+
+// main setup
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Start");
+  pinMode(LED_BUILTIN, OUTPUT);
+  setupBluetoothServer();
+  setupHallSensor();
+
+  elapsedTime = 0;
+  elapsedSampleTime = 0;
+  rev = 0;
+  intervalEntries = 0;
+
+   crankrev = 0;
+  lastcrank = 0;
+   wheelrev = 0;
+  lastwheel = 0;
 }
+
+
+
+// setup BLE
+void setupBluetoothServer() {
+  Serial.println("Starting BLE Server");
+  Serial.println("Name: " SERVER_NAME);
+
+  // create BLE device
+  BLEDevice::init(SERVER_NAME);
+  
+  // create BLE server
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // create BLE service
+  BLEService *pService = pServer->createService(CSC_SERVICE_UUID);
+  
+  // add CSC services
+  pService->addCharacteristic( &cscMeasurementCharacteristics);
+  pService->addCharacteristic( &cscFeatureCharacteristics);
+  pService->addCharacteristic( &sensorLocationCharacteristics);
+  pService->addCharacteristic( &scControlPointCharacteristics);
+
+  // set custom descriptors
+  cscMeasurementDescriptor.setValue( "Exercise Bike CSC Measurement");
+  cscMeasurementCharacteristics.addDescriptor( &cscMeasurementDescriptor);
+  cscMeasurementCharacteristics.addDescriptor( new BLE2902());
+
+  cscFeatureDescriptor.setValue ("Exercise Bike CSC Feature");
+  cscFeatureCharacteristics.addDescriptor (&cscFeatureDescriptor);
+ 
+  sensorLocationDescriptor.setValue( "Exercise Bike CSC Sensor Location");
+  sensorLocationCharacteristics.addDescriptor( &sensorLocationDescriptor);
+ 
+  scControlPointDescriptor.setValue( "Exercise Bike CSC SC Control Point");
+  scControlPointCharacteristics.addDescriptor( &scControlPointDescriptor);
+
+  // start service
+  pService->start();
+
+  // start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(CSC_SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+
+  pServer->getAdvertising()->start();
+  Serial.println("Advertising to clients...");
+}
+
+
+
+// setup Hall sensor
+void setupHallSensor() {
+  pinMode(digitalPin, INPUT);
+  magStateOld = digitalRead(digitalPin);
+}
+
+
 
 //incrementRevolutions() used to synchronously update rev rather than using an ISR.
-inline bool positiveEdge(bool state, bool &oldState)
-{
-    bool result = (state && !oldState);//latch logic
-    oldState = state;
-    return result;
+inline bool positiveEdge(bool state, bool &oldState) {
+  bool result = (state && !oldState);  //latch logic
+  oldState = state;
+  return result;
 }
 
-double calculateRpmFromRevolutions(int revolutions, unsigned long revolutionsTime)
-{
-    double ROAD_WHEEL_TO_TACH_WHEEL_RATIO = 20.68;
-    double instantaneousRpm = revolutions * 60 * 1000 / revolutionsTime / ROAD_WHEEL_TO_TACH_WHEEL_RATIO;
-    // Serial.printf("revolutionsTime: %d, rev: %d , instantaneousRpm: %2.9f \n", revolutionsTime, revolutions, instantaneousRpm);
-    return instantaneousRpm;
+
+
+// calculations
+double calculateRpmFromRevolutions(int revolutions, unsigned long revolutionsTime) {
+  double ROAD_WHEEL_TO_TACH_WHEEL_RATIO = 10.0;
+  double instantaneousRpm = revolutions * 60 * 1000 / revolutionsTime / ROAD_WHEEL_TO_TACH_WHEEL_RATIO;
+  // Serial.printf("revolutionsTime: %d, rev: %d , instantaneousRpm: %2.9f \n", revolutionsTime, revolutions, instantaneousRpm);
+  return instantaneousRpm;
 }
 
-double calculateKphFromRpm(double rpm)
-{
-    double WHEEL_RADIUS = 0.00034; // in km
-    double KM_TO_MI = 0.621371;
+double calculateKphFromRpm(double rpm) {
+  double WHEEL_RADIUS = 0.00034;  // in km
+  double KM_TO_MI = 0.621371;
 
-    double circumfrence = 2 * PI * WHEEL_RADIUS;
-    double metricDistance = rpm * circumfrence;
-    double kph = metricDistance * 60;
-    // Serial.printf("rpm: %2.2f, circumfrence: %2.2f, distance %2.5f , speed: %2.2f \n", rpm, circumfrence, metricDistance, kmh);
-    return kph;
+  double circumfrence = 2 * PI * WHEEL_RADIUS;
+  double metricDistance = rpm * circumfrence;
+  double kph = metricDistance * 60;
+  // Serial.printf("rpm: %2.2f, circumfrence: %2.2f, distance %2.5f , speed: %2.2f \n", rpm, circumfrence, metricDistance, kmh);
+  return kph;
 }
 
 unsigned long distanceTime = 0;
-double calculateDistanceFromKph(unsigned long distanceTimeSpan, double kph)
-{
-    double incrementalDistance = distanceTimeSpan * kph / 60 / 60 / 1000;
-    // Serial.printf("kph: %2.2f, distanceTimeSpan %d , incrementalDistance: %2.9f \n", kph, distanceTimeSpan, incrementalDistance);
-    return incrementalDistance;
+double calculateDistanceFromKph(unsigned long distanceTimeSpan, double kph) {
+  double incrementalDistance = distanceTimeSpan * kph / 60 / 60 / 1000;
+  // Serial.printf("kph: %2.2f, distanceTimeSpan %d , incrementalDistance: %2.9f \n", kph, distanceTimeSpan, incrementalDistance);
+  return incrementalDistance;
 }
 
-double tireValues[] = {0.005, 0.004, 0.012};                      //Clincher, Tubelar, MTB
-double aeroValues[] = {0.388, 0.445, 0.420, 0.300, 0.233, 0.200}; //Hoods, Bartops, Barends, Drops, Aerobar
+double tireValues[] = { 0.005, 0.004, 0.012 };                       //Clincher, Tubelar, MTB
+double aeroValues[] = { 0.388, 0.445, 0.420, 0.300, 0.233, 0.200 };  //Hoods, Bartops, Barends, Drops, Aerobar
 unsigned long caloriesTime = 0;
-double calculatePowerFromKph(double kph)
-{
-    double velocity = kph * 0.277778; // translates to meters/second
-    double riderWeight = 72.6;       //165 lbs
-    double bikeWeight = 11.1;        //Cannondale road bike
-    int theTire = 0;                 //Clinchers
-    double rollingRes = tireValues[theTire];
-    int theAero = 1; //Bartops
-    double frontalArea = aeroValues[theAero];
-    double grade = 0;
-    double headwind = 0;        // converted to m/s
-    double temperaturev = 15.6; // 60 degrees farenheit
-    double elevation = 100;     // Meters
-    double transv = 0.95;       // no one knows what this is, so why bother presenting a choice?
+double calculatePowerFromKph(double kph) {
+  double velocity = kph * 0.277778;  // translates to meters/second
+  double riderWeight = 72.6;         //165 lbs
+  double bikeWeight = 11.1;          //Cannondale road bike
+  int theTire = 0;                   //Clinchers
+  double rollingRes = tireValues[theTire];
+  int theAero = 1;  //Bartops
+  double frontalArea = aeroValues[theAero];
+  double grade = 0;
+  double headwind = 0;         // converted to m/s
+  double temperaturev = 15.6;  // 60 degrees farenheit
+  double elevation = 100;      // Meters
+  double transv = 0.95;        // no one knows what this is, so why bother presenting a choice?
 
-    /* Common calculations */
-    double density = (1.293 - 0.00426 * temperaturev) * exp(-elevation / 7000.0);
-    double twt = 9.8 * (riderWeight + bikeWeight); // total weight in newtons
-    double A2 = 0.5 * frontalArea * density;       // full air resistance parameter
-    double tres = twt * (grade + rollingRes);      // gravity and rolling resistance
+  /* Common calculations */
+  double density = (1.293 - 0.00426 * temperaturev) * exp(-elevation / 7000.0);
+  double twt = 9.8 * (riderWeight + bikeWeight);  // total weight in newtons
+  double A2 = 0.5 * frontalArea * density;        // full air resistance parameter
+  double tres = twt * (grade + rollingRes);       // gravity and rolling resistance
 
-    // we calculate power from velocity
-    double tv = velocity + headwind;      //terminal velocity
-    double A2Eff = (tv > 0.0) ? A2 : -A2; // wind in face so you must reverse effect
-    return (velocity * tres + velocity * tv * tv * A2Eff) / transv;    
+  // we calculate power from velocity
+  double tv = velocity + headwind;       //terminal velocity
+  double A2Eff = (tv > 0.0) ? A2 : -A2;  // wind in face so you must reverse effect
+  return (velocity * tres + velocity * tv * tv * A2Eff) / transv;
 }
 
-double calculateCaloriesFromPower(unsigned long caloriesTimeSpan, double powerv)
-{
-    double JOULE_TO_KCAL = 0.238902957619;
-    // From the formula: Energy (Joules) = Power (Watts) * Time (Seconds)
-    double incrementalCalories =  powerv * caloriesTimeSpan / 60 / 1000 * JOULE_TO_KCAL; 
-    double wl = incrementalCalories / 32318.0;    // comes from 1 lb = 3500 Calories
-    return incrementalCalories;
-}
-
-void indicateRpmWithLight(int rpm)
-{
-    if (rpm > 1) {
-        digitalWrite(LED_BUILTIN, HIGH); // turn on LED
-    } else {
-        digitalWrite(LED_BUILTIN, LOW);  // turn off LED
-    }
-}
-
-//Used for debugging, i.e. `printArray(bikeData, sizeof(bikeData));` 
-//NOTE: sizeOfArray parameter is necessary 
-//This is because `sizeOf()` will return the size of the pointer to the array, not the array
-void printArray(byte input[], int sizeOfArray)
-{
-    for (size_t i = 0; i < sizeOfArray; i++) 
-    {
-        Serial.print(input[i]);
-        Serial.print(' ');
-    }
+double calculateCaloriesFromPower(unsigned long caloriesTimeSpan, double powerv) {
+  double JOULE_TO_KCAL = 0.238902957619;
+  // From the formula: Energy (Joules) = Power (Watts) * Time (Seconds)
+  double incrementalCalories = powerv * caloriesTimeSpan / 60 / 1000 * JOULE_TO_KCAL;
+  double wl = incrementalCalories / 32318.0;  // comes from 1 lb = 3500 Calories
+  return incrementalCalories;
 }
 
 
 
-
-
-
-
-
-
-
-//  byte features[] = {0x07,0x52,0x00,0x00}; 
-// // 0x07,0x52 (0x48,0x4a in big-endian) are flags for
-// // avgSpeed (0), cadence (1), total distance (2), expended energy (9), elapsed time (12), power measurement (14)  
-// void transmitFTMS(double rpm, double avgRpm, double kph, double avgKph, double power, double avgPower, 
-//                   double runningDistance, double runningCalories, unsigned long elapsedTime)
-// {
-//     uint16_t transmittedKph     = (uint16_t) (kph * 100);                              //(0.01 resolution)
-//     uint16_t transmittedTime    = (uint16_t) (elapsedTime / 1000);                     //(1.0 resolution) 
-//     uint16_t transmittedAvgKph  = (uint16_t) (avgKph * 100);                           //(0.01 resolution)
-//     uint16_t transmittedRpm     = (uint16_t) (rpm * 2);                                //(0.5 resolution)
-//     uint16_t transmittedAvgRpm  = (uint16_t) (avgRpm * 2);                             //(0.1 resolution)
-//     uint16_t transmittedPower   = (uint16_t) (power * 2);                              //(1.0 resolution)
-//     uint16_t transmittedAvgPower= (uint16_t) (avgPower * 2);                           //(1.0 resolution)
-//     uint32_t transmittedDistance= (uint32_t) (runningDistance * 1000);                 // runningDistance in km, need m 
-//     uint16_t transmittedTotalCal= (uint16_t) (runningCalories * 10);                   //(1.0 resolution)
-//     uint16_t transmittedCalHr   = (uint16_t) (runningCalories * 60 * 60 / elapsedTime);//(1.0 resolution) 
-//     uint8_t transmittedCalMin   = (uint8_t)  (runningCalories * 60 / elapsedTime);     //(1.0 resolution)
-    
-//     bool disconnecting = !deviceConnected && oldDeviceConnected;
-//     bool connecting = deviceConnected && !oldDeviceConnected;
-    
-//     byte bikeData[20]={0x56,0x09, // these bytes are the flags for
-//                     // instSpeed (0 counts as true here), avgSpeed(1), instCadence (2),  
-//                     // total distance (4), instPower (6), expended energy (8), elapsed time (11)
-//                     (uint8_t)transmittedKph,       (uint8_t)(transmittedKph >> 8),
-//                     (uint8_t)transmittedAvgKph,    (uint8_t)(transmittedAvgKph >> 8),
-//                     (uint8_t)transmittedRpm,       (uint8_t)(transmittedRpm >> 8),
-//                     //(uint8_t)transmittedAvgRpm,    (uint8_t)(transmittedAvgRpm >> 8), //NOTE: commented out to avoid exceeding MTU                   
-//                     (uint8_t)transmittedDistance,  (uint8_t)(transmittedDistance >> 8),(uint8_t)(transmittedDistance >> 16),        
-//                     (uint8_t)transmittedPower,     (uint8_t)(transmittedPower >> 8), //NOTE: Actually SINT16, but my bike can't peddle backwards
-//                     //(uint8_t)transmittedAvgPower,(uint8_t)(transmittedAvgPower >> 8), //NOTE: commented out to avoid exceeding MTU                        
-//                     (uint8_t)transmittedTotalCal,  (uint8_t)(transmittedTotalCal >> 8),                    
-//                     (uint8_t)transmittedCalHr,     (uint8_t)(transmittedCalHr >> 8),                    
-//                     transmittedCalMin,
-//                     (uint8_t)transmittedTime,      (uint8_t)(transmittedTime >> 8)
-//       };
-//     if (deviceConnected)
-//     {
-//         //NOTE: Even though the ATT_MTU for BLE is 23 bytes, android by default only captures the first 20 bytes.
-//         indoorBikeDataCharacteristic->setValue((uint8_t *)&bikeData, 20);
-//         indoorBikeDataCharacteristic->notify();
-//     }
-    
-//     if (disconnecting) // give the bluetooth stack the chance to get things ready & restart advertising
-//     {
-//         delay(500);                  
-//         pServer->startAdvertising(); 
-//         Serial.println("start advertising");
-//         oldDeviceConnected = deviceConnected;
-//     }
-    
-//     if (connecting) // execute one time notification of supported features
-//     { 
-//         oldDeviceConnected = deviceConnected;
-//         fitnessMachineFeaturesCharacteristic->setValue((byte*)&features, 4);
-//         fitnessMachineFeaturesCharacteristic->notify();
-//     }
-// }
-
-
-
-
-
-byte features[] = {0x02,0x00,0x00,0x00}; 
-// feature [bit]: cadence (1) 
-void transmitCSC(double cadence)
-{
-    uint16_t transmittedCadence   = (uint16_t) (cadence * 2);                                //(0.5 resolution)
-    
-    bool disconnecting = !deviceConnected && oldDeviceConnected;
-    bool connecting = deviceConnected && !oldDeviceConnected;
-    
-    byte bikeData[20]={0x02,0x00, // these bytes are the flags for
-                    // cadence (1)   
-                    (uint8_t)transmittedCadence,       (uint8_t)(transmittedCadence >> 8),
-      };
-    if (deviceConnected)
-    {
-        //NOTE: Even though the ATT_MTU for BLE is 23 bytes, android by default only captures the first 20 bytes.
-        cscMeasurementCharacteristic->setValue((uint8_t *)&bikeData, 20);
-        cscMeasurementCharacteristic->notify();
-    }
-    
-    if (disconnecting) // give the bluetooth stack the chance to get things ready & restart advertising
-    {
-        Serial.println("disconnecting...");
-        delay(500);                  
-        pServer->startAdvertising(); 
-        Serial.println("start advertising...");
-        oldDeviceConnected = deviceConnected;
-    }
-    
-    if (connecting) // execute one time notification of supported features
-    { 
-        Serial.println("connecting...");
-        oldDeviceConnected = deviceConnected;
-        cyclingSpeedAndCadanceCharacteristic->setValue((byte*)&features, 4);
-        cyclingSpeedAndCadanceCharacteristic->notify();
-    }
+void indicateRpmWithLight(int rpm) {
+  if (rpm > 1) {
+    digitalWrite(LED_BUILTIN, HIGH);  // turn on LED
+  } else {
+    digitalWrite(LED_BUILTIN, LOW);  // turn off LED
+  }
 }
 
 
 
+void serviceNotify(int wheelrev, int lastwheel, int crankrev, int lastcrank) {
+
+  // set measurement
+  cscMeasurement[1] = wheelrev & 0xFF;
+  cscMeasurement[2] = (wheelrev >> 8) & 0xFF; 
+
+  cscMeasurement[3] = (wheelrev >> 16) & 0xFF; 
+  cscMeasurement[4] = (wheelrev >> 24) & 0xFF; 
+  
+  cscMeasurement[5] = lastwheel & 0xFF;
+  cscMeasurement[6] = (lastwheel >> 8) & 0xFF; 
+
+  cscMeasurement[7] = crankrev & 0xFF;
+  cscMeasurement[8] = (crankrev >> 8) & 0xFF; 
+
+  cscMeasurement[9] = lastcrank & 0xFF;
+  cscMeasurement[10] = (lastcrank >> 8) & 0xFF; 
+
+
+  // connection state
+  bool disconnecting = !deviceConnected && oldDeviceConnected;
+  bool connecting = deviceConnected && !oldDeviceConnected;
+
+  // notify with data if connected
+  if (deviceConnected) {
+    cscMeasurementCharacteristics.setValue(cscMeasurement, 11);
+    cscMeasurementCharacteristics.notify();
+    Serial.print("> client");
+  }
+
+  // restart advertising if disconnected
+  if (disconnecting) {
+    Serial.println("\nClient disconnected!");
+    delay(500);
+    pServer->startAdvertising();
+    Serial.print("Advertising...");
+    oldDeviceConnected = deviceConnected;
+  }
+
+  // notify with features if connecting
+  if (connecting) {
+    Serial.println("\nconnecting...");
+    oldDeviceConnected = deviceConnected;
+    cscFeatureCharacteristics.setValue(cscFeature, 1);
+    sensorLocationCharacteristics.setValue(sensorLocation, 1); 
+    Serial.print("notified client of features");
+  }
+}
 
 
 
+// main loop
+void loop() {
+  unsigned long intervalTime = millis() - elapsedTime;
 
+  // lincrement rev
+  unsigned long sampleTime = millis() - elapsedSampleTime;
+  bool state = digitalRead(digitalPin);
 
+  if (sampleTime > 5 && state != magStateOld) {
+    rev += (int)positiveEdge(state, magStateOld);
+    elapsedSampleTime = millis();
+  }
 
+  // notify every second
+  if (intervalTime > 1000) {
+    // simulation
+    int rev = (int)(80 + 10 * sin(2.0 * 3.14159 * elapsedTime / 50.0));
+    cadence = 50;
 
-unsigned long elapsedTime = 0;
-unsigned long elapsedSampleTime = 0;
-int rev = 0;
-double intervalEntries = 0;
-void loop()
-{
-    unsigned long intervalTime = millis() - elapsedTime;
-    unsigned long sampleTime = millis() - elapsedSampleTime;
-    bool state = digitalRead(digitalPin);
-    if (sampleTime > 5 && state != magStateOld)
-    {
-        rev += (int)positiveEdge(state, magStateOld);
-        elapsedSampleTime = millis();
-    }
-    if (intervalTime > 500)
-    {
-        //double rpm = calculateRpmFromRevolutions(rev, intervalTime);
-        //double kph = calculateKphFromRpm(rpm);
-        //double power = calculatePowerFromKph(kph);
-        
-        intervalEntries++;
+     crankrev = crankrev + 1;
+    lastcrank = lastcrank + 1024*60/cadence;
+     wheelrev = wheelrev + 1;
+    lastwheel = lastwheel + 1024*60/cadence;
 
-        // synthetic oscilating readings
-        double rev = 80+10*sin(2.0*3.14159*elapsedTime/100.0);
-        double rpm = 2.0*rev;
+    //double rpm = calculateRpmFromRevolutions(rev, intervalTime);
+    //double kph = calculateKphFromRpm(rpm);
+    //double power = calculatePowerFromKph(kph);
 
-        Serial.printf("SEC %6.1f  RPM %5.1f REV %4.1f\n", elapsedTime/1000.0, rpm, rev);
+    // serial output
+    Serial.printf("WR %4d WT %7d CR %4d CT %7d ", wheelrev, lastwheel, crankrev, lastcrank);
 
-        indicateRpmWithLight(rev);
+    // BLE notify
+    serviceNotify(wheelrev,lastwheel,crankrev,lastcrank);
 
-        transmitCSC(rev);
+    // LED status
+    indicateRpmWithLight(wheelrev);
 
-        rev = 0;
-        elapsedTime = millis();
-    }
+    // loop varables
+    Serial.printf("\n");
+    rev = 0;
+    intervalEntries++;
+    elapsedTime = millis();
+  }
 }

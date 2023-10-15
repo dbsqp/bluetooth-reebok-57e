@@ -11,7 +11,7 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 ## Bluetooth Service
 The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
 
-This branche focuses on the supported Bluetooth [Cycling Speed and Cadence Service (CSCS)](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
+This branche focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
 
 ## Status
 Unfinished, under developement.
@@ -24,12 +24,12 @@ Unfinished, under developement.
 1. Update readme
 1. Test flash unedited code to ESP32
 1. Update code for specific hardware identities [Reebok 5.7e]
-1. Code for Bluetooth Cycling Speed and Cadence Service [CSCS] cf. FTMS
+1. Code for Bluetooth Cycling Speed and Cadence (CSC) service cf. FTMS
 1. Test connect ESP32 to monitoring device
+1. Update code to report simulated dynamic metrics [CSC]
 
 ### Todo
-1. Update code to report synthetic dynamic key metrics [CSCS]
-1. Code for Bluetooth Cycling Power Service [CPS] cf. CSCS
+1. Code for Bluetooth Cycling Power Service [CPS]
 1. Investigate bike hardware
 1. Identify sensor source for rotation
 1. Identify sensor source for resistance
