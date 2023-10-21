@@ -3,7 +3,7 @@
     Ported to Arduino ESP32 by Evandro Copercini
     updates by chegewara
     based on esp32-ftms-server by jamesjmtaylor
-    edited for Reebok 5.7e indoor exercise bike by dbsqp
+    updated for Reebok 5.7e indoor exercise bike by dbsqp
 */
 
 #include <BLEDevice.h>
@@ -13,12 +13,17 @@
 #include <math.h>
 
 
+
 // options
-#define CSC_MODE
+//#define CSC_MODE
 #define SERVER_NAME "Reebok 5.7e Bike"
 
 // globals
 BLEServer *pServer;
+
+unsigned long elapsedTime;
+unsigned long elapsedSampleTime;
+int rev;            // trigger
 
 uint16_t crankrev;  // Cadence RPM
 uint16_t lastcrank; // Last crank time
@@ -28,21 +33,13 @@ uint16_t power;     // power [Watts]
 
 uint16_t cadence;
 
-unsigned long elapsedTime;
-unsigned long elapsedSampleTime;
-int rev;
-double intervalEntries;
-
-// set bit:feature
 // CSC 16bit/0-15 - 2/2:multi-location 1/1:crankRev 0/0:wheelRev
 byte cscFeature[1] = { 0b0000000000000011 };
 byte cscMeasurement[11] = { 0b00000011, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-// CP 32 bit/0-31 - 3/5:crankRev
-byte cpFeature[1] = { 0b00000000000000000000000000001000 };
-byte cpMeasurement[11] = { 0b0000000000100000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-byte sensorLocation[1] = { 6 };
+// CP 32 bit/0-31 - 4/5:crankRev 3/4:wheelRev
+byte cpFeature[1] = { 0b00000000000000000000000000001100 };
+byte cpMeasurement[16] = { 0b0000000000110000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -73,6 +70,7 @@ BLECharacteristic cpFeatureCharacteristics(      BLEUUID ((uint16_t) 0x2A65), BL
 //0x2901 is a custom user description
 BLEDescriptor cpMeasurementDescriptor(  BLEUUID ((uint16_t) 0x2901));
 BLEDescriptor cpFeatureDescriptor(      BLEUUID ((uint16_t) 0x2901));
+BLEDescriptor cpControlPointDescriptor( BLEUUID ((uint16_t) 0x2901));
 
 
 
@@ -92,7 +90,7 @@ class MyServerCallbacks : public BLEServerCallbacks {
 // main setup
 void setup() {
   Serial.begin(115200);
-  Serial.print("Mode: ");
+  Serial.print("Start\nMode: ");
 
   #if defined(CSC_MODE)
     Serial.println("Cadence");
@@ -106,7 +104,6 @@ void setup() {
 
         elapsedTime = 0;
   elapsedSampleTime = 0;
-    intervalEntries = 0;
 
         rev = 0;
    crankrev = 0;
@@ -120,8 +117,7 @@ void setup() {
 
 // setup BLE
 void setupBluetoothServer() {
-  Serial.println("Starting server");
-  Serial.println("Name: " SERVER_NAME);
+  Serial.println("Server Name: " SERVER_NAME);
 
   // create BLE device
   BLEDevice::init(SERVER_NAME);
@@ -159,6 +155,7 @@ void setupBluetoothServer() {
 
   // start service
   pService->start();
+  Serial.println("Server: Started");
 
   // start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -173,7 +170,7 @@ void setupBluetoothServer() {
   pAdvertising->setMinPreferred(0x12);
 
   pServer->getAdvertising()->start();
-  Serial.println("Advertising service to clients...");
+  Serial.println("Server: Advertising...");
 }
 
 
@@ -214,48 +211,28 @@ double calculateKphFromRpm(double rpm) {
   return kph;
 }
 
-unsigned long distanceTime = 0;
-double calculateDistanceFromKph(unsigned long distanceTimeSpan, double kph) {
-  double incrementalDistance = distanceTimeSpan * kph / 60 / 60 / 1000;
-  // Serial.printf("kph: %2.2f, distanceTimeSpan %d , incrementalDistance: %2.9f \n", kph, distanceTimeSpan, incrementalDistance);
-  return incrementalDistance;
-}
-
-double tireValues[] = { 0.005, 0.004, 0.012 };                       //Clincher, Tubelar, MTB
-double aeroValues[] = { 0.388, 0.445, 0.420, 0.300, 0.233, 0.200 };  //Hoods, Bartops, Barends, Drops, Aerobar
 unsigned long caloriesTime = 0;
 double calculatePowerFromKph(double kph) {
-  double velocity = kph * 0.277778;  // translates to meters/second
-  double riderWeight = 72.6;         //165 lbs
-  double bikeWeight = 11.1;          //Cannondale road bike
-  int theTire = 0;                   //Clinchers
-  double rollingRes = tireValues[theTire];
-  int theAero = 1;  //Bartops
-  double frontalArea = aeroValues[theAero];
-  double grade = 0;
-  double headwind = 0;         // converted to m/s
-  double temperaturev = 15.6;  // 60 degrees farenheit
-  double elevation = 100;      // Meters
-  double transv = 0.95;        // no one knows what this is, so why bother presenting a choice?
+  double velocity = kph * 0.2777; // m/s
+  double riderWeight = 72.0;      // kg
+  double bikeWeight = 12.0;       // kg
+  double rollingRes = 0.004;
+  double frontalArea = 0.445;     // Bartops
+  double grade = 0;               // °
+  double headwind = 0;            // m/s
+  double temperature = 15.0;      // °C
+  double elevation = 100;         // m
+  double transv = 0.95;           // unknown
 
-  /* Common calculations */
-  double density = (1.293 - 0.00426 * temperaturev) * exp(-elevation / 7000.0);
+  double density = (1.293 - 0.00426 * temperature) * exp(-elevation / 7000.0);
   double twt = 9.8 * (riderWeight + bikeWeight);  // total weight in newtons
   double A2 = 0.5 * frontalArea * density;        // full air resistance parameter
   double tres = twt * (grade + rollingRes);       // gravity and rolling resistance
 
   // we calculate power from velocity
-  double tv = velocity + headwind;       //terminal velocity
-  double A2Eff = (tv > 0.0) ? A2 : -A2;  // wind in face so you must reverse effect
+  double tv = velocity + headwind;       // terminal velocity
+  double A2Eff = (tv > 0.0) ? A2 : -A2;  // reverse effect wind in face
   return (velocity * tres + velocity * tv * tv * A2Eff) / transv;
-}
-
-double calculateCaloriesFromPower(unsigned long caloriesTimeSpan, double powerv) {
-  double JOULE_TO_KCAL = 0.238902957619;
-  // From the formula: Energy (Joules) = Power (Watts) * Time (Seconds)
-  double incrementalCalories = powerv * caloriesTimeSpan / 60 / 1000 * JOULE_TO_KCAL;
-  double wl = incrementalCalories / 32318.0;  // comes from 1 lb = 3500 Calories
-  return incrementalCalories;
 }
 
 
@@ -270,15 +247,11 @@ void indicateRpmWithLight(int rpm) {
 
 
 
-
-
-
 void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) {
 
   // set measurement
   cscMeasurement[1] = wheelrev & 0xFF;
   cscMeasurement[2] = (wheelrev >> 8) & 0xFF; 
-
   cscMeasurement[3] = (wheelrev >> 16) & 0xFF; 
   cscMeasurement[4] = (wheelrev >> 24) & 0xFF; 
   
@@ -290,7 +263,6 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
 
   cscMeasurement[9] = lastcrank & 0xFF;
   cscMeasurement[10] = (lastcrank >> 8) & 0xFF; 
-
 
   // monitor state
   bool disconnecting = !deviceConnected && oldDeviceConnected;
@@ -307,33 +279,42 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   if (disconnecting) {
     delay(500);
     pServer->startAdvertising();
-    Serial.print("nClient disconnected, re-advertising...");
+    Serial.println("\nClient: disconnected");
+    Serial.print("Server: Advertising...");
+
     oldDeviceConnected = deviceConnected;
   }
 
   // feature notify if connecting
   if (connecting) {
-    Serial.print("\nConnecting...");
     oldDeviceConnected = deviceConnected;
+    Serial.println("\nClient: connected");
     cscFeatureCharacteristics.setValue(cscFeature, 1);
-    Serial.print("notified client of features");
+    Serial.print("Server: set features");
   }
 }
 
 
 
-void serviceNotifyCP(int power, int crankrev, int lastcrank) {
+void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int lastcrank) {
 
   // set measurement
   cpMeasurement[2] = power & 0xFF;
   cpMeasurement[3] = (power >> 8) & 0xFF; 
   
-  cpMeasurement[5] = crankrev & 0xFF;
-  cpMeasurement[6] = (crankrev >> 8) & 0xFF; 
+  cpMeasurement[4] = wheelrev & 0xFF;
+  cpMeasurement[5] = (wheelrev >> 8) & 0xFF; 
+  cpMeasurement[6] = (wheelrev >> 16) & 0xFF; 
+  cpMeasurement[7] = (wheelrev >> 24) & 0xFF; 
 
-  cpMeasurement[7] = lastcrank & 0xFF;
-  cpMeasurement[8] = (lastcrank >> 8) & 0xFF; 
+  cpMeasurement[8] = lastwheel & 0xFF;
+  cpMeasurement[9] = (lastwheel >> 8) & 0xFF; 
 
+  cpMeasurement[10] = crankrev & 0xFF;
+  cpMeasurement[11] = (crankrev >> 8) & 0xFF; 
+
+  cpMeasurement[12] = lastcrank & 0xFF;
+  cpMeasurement[13] = (lastcrank >> 8) & 0xFF; 
 
   // connection state
   bool disconnecting = !deviceConnected && oldDeviceConnected;
@@ -341,7 +322,7 @@ void serviceNotifyCP(int power, int crankrev, int lastcrank) {
 
   // notify with data if connected
   if (deviceConnected) {
-    cpMeasurementCharacteristics.setValue(cpMeasurement, 11);
+    cpMeasurementCharacteristics.setValue(cpMeasurement, 16);
     cpMeasurementCharacteristics.notify();
     Serial.print(">> client");
   }
@@ -350,16 +331,17 @@ void serviceNotifyCP(int power, int crankrev, int lastcrank) {
   if (disconnecting) {
     delay(500);
     pServer->startAdvertising();
-        Serial.print("\nClient disconnected, re-advertising...");
+    Serial.println("\nClient: disconnected");
+    Serial.print("Server: Advertising...");
     oldDeviceConnected = deviceConnected;
   }
 
   // feature notify if connecting
   if (connecting) {
-    Serial.print("\nConnecting...");
+    Serial.println("\nClient: connected");
     oldDeviceConnected = deviceConnected;
     cpFeatureCharacteristics.setValue(cpFeature, 1);
-    Serial.print("notified client of features");
+    Serial.print("Server: set features");
   }
 }
 
@@ -382,14 +364,22 @@ void loop() {
   if (intervalTime > 1000) {
     // simulation
     int rev = (int)(80 + 10 * sin(2.0 * 3.14159 * elapsedTime / 50.0));
-    cadence = 50;
+    cadence =  80; //  80/100 > 30.0/37.5 kph
 
+    // based on sensor triggers per crank revolution
      crankrev = crankrev + 1;
     lastcrank = lastcrank + 1024*60/cadence;
-     wheelrev = wheelrev + 1;
-    lastwheel = lastwheel + 10*1024*60/cadence;
 
-        power = rev*2;
+    // based on Apple Watch default wheel dimension 700c x 2.5mm
+     wheelrev = crankrev * 3;
+
+    #if defined(CSC_MODE)
+      lastwheel = lastcrank * 1; // 1s/1024 granularity
+    #else
+      lastwheel = lastcrank * 2; // 1s/2048 granularity
+    #endif
+
+      power = cadence*2;
 
     //double rpm = calculateRpmFromRevolutions(rev, intervalTime);
     //double kph = calculateKphFromRpm(rpm);
@@ -400,8 +390,8 @@ void loop() {
       Serial.printf("WR %4d WT %7d CR %4d CT %7d ", wheelrev, lastwheel, crankrev, lastcrank);
       serviceNotifyCSC(wheelrev,lastwheel,crankrev,lastcrank);
     #else
-      Serial.printf("P %4d CR %4d CT %7d ", power, crankrev, lastcrank);
-      serviceNotifyCP(power,crankrev,lastcrank);
+      Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d ", power, wheelrev, lastwheel, crankrev, lastcrank);
+      serviceNotifyCP(power, wheelrev, lastwheel, crankrev, lastcrank);
     #endif
 
     // LED status
@@ -410,7 +400,6 @@ void loop() {
     // loop varables
     Serial.printf("\n");
     rev = 0;
-    intervalEntries++;
     elapsedTime = millis();
   }
 }
