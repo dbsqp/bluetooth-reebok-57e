@@ -27,18 +27,18 @@ Unfinished, under developement.
 1. Code for Bluetooth Cycling Speed and Cadence (CSC) service cf. FTMS
 1. Test connect ESP32 to monitoring device
 1. Update code to report simulated dynamic metrics [CSC]
+1. Code for Bluetooth Cycling Power Service [CPS]
 
 ### Todo
-1. Code for Bluetooth Cycling Power Service [CPS]
 1. Investigate bike hardware
 1. Identify sensor source for rotation
 1. Identify sensor source for resistance
 1. Access direct rotation sensor tap, bike-computer interface sniff or additional external sensor
 1. Create prototype interface circuit between rotation sensor and microcontroller input
-1. Update code to report key rotation based metrics
+1. Update code to report valid rotation metrics
 1. Access direct resistance sensor tap, bike-computer interface sniff or additional external sensor
 1. Create prototype interface circuit between resistance sensor and microcontroller input
-1. Update code to report key rotation and resistance based metrics
+1. Update code to report valid rotation and resistance metrics
 1. Assess MCU power source from exercise bike computer
 1. Assess power on/off with bike computer
 1. Implement standby/disconnect on idle (robust power down)
