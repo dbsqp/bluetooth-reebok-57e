@@ -28,17 +28,19 @@ Unfinished, under developement.
 1. Test connect ESP32 to monitoring device
 1. Update code to report simulated dynamic metrics [CSC]
 1. Code for Bluetooth Cycling Power Service [CPS]
+1. Investigate bike hardware [needed crank puller]
+1. Identify sensor source for rotation [reed not Hall sensor]
+1. Assess MCU power source from exercise bike computer [5V from 7805 voltage regulator or programming header GND/VDD]
+1. Access direct rotation sensor [5V pulled to GND tap reed switch (RPM) contact on main PCB]
+1. Identify sensor source for resistance [main PCB - optoisolator - power circuit - power board - rectified AC - triac]
+1. Update code to read PWM [analogueRead]
+1. Create prototype interface circuit from reed switch to ESP32 [TIP125 PNP common GND, base to GPIO]
+1. Create prototype interface circuit from optoisolator to ESP32 [TIP120 NPN common GND, base to GPIO]
 
 ### Todo
-1. Investigate bike hardware
-1. Identify sensor source for rotation
-1. Identify sensor source for resistance
-1. Access direct rotation sensor tap, bike-computer interface sniff or additional external sensor
-1. Create prototype interface circuit between rotation sensor and microcontroller input
+1. Access direct resistance sensor [5V 1 kHz PMW tap optoisolator on main PCB]
 1. Update code to report valid rotation metrics
-1. Access direct resistance sensor tap, bike-computer interface sniff or additional external sensor
-1. Create prototype interface circuit between resistance sensor and microcontroller input
-1. Update code to report valid rotation and resistance metrics
-1. Assess MCU power source from exercise bike computer
 1. Assess power on/off with bike computer
 1. Implement standby/disconnect on idle (robust power down)
+1. Update code to report valid resistance metrics
+1. Reverse engineer resistance/cadance to power function
