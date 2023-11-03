@@ -30,17 +30,20 @@ Unfinished, under developement.
 1. Code for Bluetooth Cycling Power Service [CPS]
 1. Investigate bike hardware [needed crank puller]
 1. Identify sensor source for rotation [reed not Hall sensor]
-1. Assess MCU power source from exercise bike computer [5V from 7805 voltage regulator or programming header GND/VDD]
+1. Assess MCU power source from exercise bike computer [5V from programming header GND/VDD]
 1. Access direct rotation sensor [5V pulled to GND tap reed switch (RPM) contact on main PCB]
 1. Identify sensor source for resistance [main PCB - optoisolator - power circuit - power board - rectified AC - triac]
 1. Update code to read PWM [analogueRead]
 1. Create prototype interface circuit from reed switch to ESP32 [TIP125 PNP common GND, base to GPIO]
-1. Create prototype interface circuit from optoisolator to ESP32 [TIP120 NPN common GND, base to GPIO]
+1. Assess power on/off with bike computer [powers up on wake, powers down on sleep]
+1. Access direct resistance sensor [5V 1 kHz PMW tap at MOSFET to optocoupler on main PCB]
+1. Create final interface board [proto board, socketed ESP32, power/sensor in headers, scope test points, strain relief, VCC in switch for USB power/debug]
+1. Fix broken resistance function [burnt out resistor to optocoupler out]
+1. Assess power on/off with bike computer [programming header always powered]
 
 ### Todo
-1. Access direct resistance sensor [5V 1 kHz PMW tap optoisolator on main PCB]
-1. Update code to report valid rotation metrics
-1. Assess power on/off with bike computer
+1. Finalise code to report valid rotation metrics
+1. Create prototype interface circuit from PMW signal to ESP32
 1. Implement standby/disconnect on idle (robust power down)
+1. Reverse engineer power (P) as a function of cadance (C) and resistance (PWM): Fix P/C measure PWM -> P=f(C,PWM)
 1. Update code to report valid resistance metrics
-1. Reverse engineer resistance/cadance to power function

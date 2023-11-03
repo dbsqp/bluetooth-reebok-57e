@@ -21,11 +21,28 @@
 
 #define PIN_REV 13  // Cadance reed-switch (trigger pulls low, sense via PNP)
 #define PIN_MAG 14  // Resistance Magnet (5V 1kHz PWM, sense via NPN)
-#define PIN_LED 32  // NOTE ESP32 GPIO 2 onboard LED = UART activity
+#define PIN_LED 32  // NOTE GPIO 2 onboard LED = ESP32 UART activity
 #define SERVER_NAME "Reebok 5.7e Bike"
+
+
 
 // globals
 BLEServer *pServer;
+
+// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
+#if defined(CSC_MODE)
+#define SERVICE_UUID BLEUUID((uint16_t)0x1816)
+BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A5C), BLECharacteristic::PROPERTY_READ);
+BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A5B), BLECharacteristic::PROPERTY_NOTIFY);
+BLECharacteristic scControlPointCharacteristics(BLEUUID((uint16_t)0x2A55), BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_INDICATE);
+BLEDescriptor scControlPointDescriptor(BLEUUID((uint16_t)0x2901));
+#else
+#define SERVICE_UUID BLEUUID((uint16_t)0x1818)
+BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacteristic::PROPERTY_READ);
+BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);
+#endif
+
+bool revStateOld;
 
 unsigned long elapsedTime;
 unsigned long elapsedSampleTime;
@@ -40,40 +57,8 @@ uint16_t power;      // power [Watts]
 
 uint16_t cadence;
 
-// CSC 16bit/0-15 - 2/2:multi-location 1/1:crankRev 0/0:wheelRev
-byte cscFeature[1] = { 0b0000000000000011 };
-byte cscMeasurement[11] = { 0b00000011, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-// CP 32 bit/0-31 - 4/5:crankRev 3/4:wheelRev
-byte cpFeature[1] = { 0b00000000000000000000000000001100 };
-byte cpMeasurement[16] = { 0b0000000000110000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-bool revStateOld;
-
-// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
-
-#define CSC_SERVICE_UUID BLEUUID((uint16_t)0x1816)
-
-BLECharacteristic cscMeasurementCharacteristics(BLEUUID((uint16_t)0x2A5B), BLECharacteristic::PROPERTY_NOTIFY);                                        // CSC Measurement Characteristic
-BLECharacteristic cscFeatureCharacteristics(BLEUUID((uint16_t)0x2A5C), BLECharacteristic::PROPERTY_READ);                                              // CSC Feature Characteristic
-BLECharacteristic scControlPointCharacteristics(BLEUUID((uint16_t)0x2A55), BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_INDICATE);  // SC Control Point Characteristic
-
-BLEDescriptor cscMeasurementDescriptor(BLEUUID((uint16_t)0x2901));  //0x2901 is a custom user description
-BLEDescriptor cscFeatureDescriptor(BLEUUID((uint16_t)0x2901));
-BLEDescriptor scControlPointDescriptor(BLEUUID((uint16_t)0x2901));
-
-
-#define CP_SERVICE_UUID BLEUUID((uint16_t)0x1818)
-
-BLECharacteristic cpMeasurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);  // CP Measurement Characteristic
-BLECharacteristic cpFeatureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacteristic::PROPERTY_READ);        // CP Feature Characteristic
-
-//0x2901 is a custom user description
-BLEDescriptor cpMeasurementDescriptor(BLEUUID((uint16_t)0x2901));
-BLEDescriptor cpFeatureDescriptor(BLEUUID((uint16_t)0x2901));
-BLEDescriptor cpControlPointDescriptor(BLEUUID((uint16_t)0x2901));
 
 
 
@@ -124,77 +109,57 @@ void setupLED() {
 // setup BLE
 void setupBluetoothServer() {
 
-  Serial.print("Server: Mode = ");
-#if defined(CSC_MODE)
-  Serial.print("Cadence / ");
-#if defined(SIMULATION)
-  Serial.println("Simulated");
-#else
-  Serial.println("Measured");
-#endif
-#else
-  Serial.print("Power / ");
-#if defined(SIMULATION)
-  Serial.println("Simulated");
-#else
-  Serial.println("Measured");
-#endif
-#endif
-
-  Serial.println("Server: Name = " SERVER_NAME);
-
   // create BLE device
   BLEDevice::init(SERVER_NAME);
+  Serial.print("Server : " SERVER_NAME);
 
   // create BLE server
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-// create service & add features
+
 #if defined(CSC_MODE)
-  BLEService *pService = pServer->createService(CSC_SERVICE_UUID);
-
-  pService->addCharacteristic(&cscMeasurementCharacteristics);
-  pService->addCharacteristic(&cscFeatureCharacteristics);
-
-  cscMeasurementDescriptor.setValue("Exercise Bike CSC Measurement");
-  cscMeasurementCharacteristics.addDescriptor(&cscMeasurementDescriptor);
-  cscMeasurementCharacteristics.addDescriptor(new BLE2902());
-
-  cscFeatureDescriptor.setValue("Exercise Bike CSC Feature");
-  cscFeatureCharacteristics.addDescriptor(&cscFeatureDescriptor);
+  Serial.print(" - Cadence [BLE/CSC]");
 #else
-  BLEService *pService = pServer->createService(CP_SERVICE_UUID);
-
-  pService->addCharacteristic(&cpMeasurementCharacteristics);
-  pService->addCharacteristic(&cpFeatureCharacteristics);
-
-  cpMeasurementDescriptor.setValue("Exercise Bike Power Measurement");
-  cpMeasurementCharacteristics.addDescriptor(&cpMeasurementDescriptor);
-  cpMeasurementCharacteristics.addDescriptor(new BLE2902());
-
-  cpFeatureDescriptor.setValue("Exercise Bike Power Feature");
-  cpFeatureCharacteristics.addDescriptor(&cpFeatureDescriptor);
+  Serial.print(" - Power [BLE/CP]");
 #endif
+
+#if defined(SIMULATION)
+  Serial.println(" - Simulation!");
+#else
+  Serial.println("");
+#endif
+
+  // create service & add measurement/features
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pService->addCharacteristic(&measurementCharacteristics);
+  pService->addCharacteristic(&featureCharacteristics);
+
+  // create descriptors for measurements
+  BLEDescriptor measurementDescriptor(BLEUUID((uint16_t)0x2901));  //0x2901 is a custom user description
+  measurementDescriptor.setValue("Exercise Bike Measurement");
+  measurementCharacteristics.addDescriptor(&measurementDescriptor);
+  measurementCharacteristics.addDescriptor(new BLE2902());
+
+  // create descriptors for features
+  BLEDescriptor featureDescriptor(BLEUUID((uint16_t)0x2901));
+  featureDescriptor.setValue("Exercise Bike Feature");
+  featureCharacteristics.addDescriptor(&featureDescriptor);
 
   // start service
   pService->start();
-  Serial.println("Server: Started");
+  Serial.print("Server : Started");
 
   // start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-#ifdef defined(CSC_MODE)
-  pAdvertising->addServiceUUID(CSC_SERVICE_UUID);
-#else
-  pAdvertising->addServiceUUID(CP_SERVICE_UUID);
-#endif
+  pAdvertising->addServiceUUID(SERVICE_UUID);
 
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x06);  // help with iPhone connection
   pAdvertising->setMinPreferred(0x12);
 
   pServer->getAdvertising()->start();
-  Serial.println("Server: Advertising...");
+  Serial.println(" & Advertising...");
 }
 
 
@@ -214,7 +179,10 @@ void setupMagSensor() {
 
 
 
-// rising edge trigger
+
+
+
+// rising edge trigger function
 inline bool risingEdge(bool &oldState, bool state) {
   bool result = (!oldState && state);  // !0 && 1
 
@@ -230,7 +198,9 @@ inline bool risingEdge(bool &oldState, bool state) {
   return result;
 }
 
-// falling edge trigger
+
+
+// falling edge trigger function
 inline bool fallingEdge(bool &oldState, bool state) {
   bool result = (oldState && !state);  // 1 && !0
 
@@ -286,34 +256,36 @@ double calculatePowerFromKph(double kph) {
 
 
 
-
-
-
+// notify CSC
 void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) {
 
+  // CSC 16bit/0-15 - 2/2:multi-location 1/1:crankRev 0/0:wheelRev
+  byte feature[1] = { 0b0000000000000011 };
+  byte measurement[11] = { 0b00000011, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
   // set measurement
-  cscMeasurement[1] = wheelrev & 0xFF;
-  cscMeasurement[2] = (wheelrev >> 8) & 0xFF;
-  cscMeasurement[3] = (wheelrev >> 16) & 0xFF;
-  cscMeasurement[4] = (wheelrev >> 24) & 0xFF;
+  measurement[1] = wheelrev & 0xFF;
+  measurement[2] = (wheelrev >> 8) & 0xFF;
+  measurement[3] = (wheelrev >> 16) & 0xFF;
+  measurement[4] = (wheelrev >> 24) & 0xFF;
 
-  cscMeasurement[5] = lastwheel & 0xFF;
-  cscMeasurement[6] = (lastwheel >> 8) & 0xFF;
+  measurement[5] = lastwheel & 0xFF;
+  measurement[6] = (lastwheel >> 8) & 0xFF;
 
-  cscMeasurement[7] = crankrev & 0xFF;
-  cscMeasurement[8] = (crankrev >> 8) & 0xFF;
+  measurement[7] = crankrev & 0xFF;
+  measurement[8] = (crankrev >> 8) & 0xFF;
 
-  cscMeasurement[9] = lastcrank & 0xFF;
-  cscMeasurement[10] = (lastcrank >> 8) & 0xFF;
+  measurement[9] = lastcrank & 0xFF;
+  measurement[10] = (lastcrank >> 8) & 0xFF;
 
   // monitor state
   bool disconnecting = !deviceConnected && oldDeviceConnected;
   bool connecting = deviceConnected && !oldDeviceConnected;
 
-  // notify with data if connected
+  // notify with measurements if connected
   if (deviceConnected) {
-    cscMeasurementCharacteristics.setValue(cscMeasurement, 11);
-    cscMeasurementCharacteristics.notify();
+    measurementCharacteristics.setValue(measurement, 11);
+    measurementCharacteristics.notify();
     Serial.print(">> client");
   }
 
@@ -331,41 +303,46 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   if (connecting) {
     oldDeviceConnected = deviceConnected;
     Serial.println("\nClient: connected");
-    cscFeatureCharacteristics.setValue(cscFeature, 1);
+    featureCharacteristics.setValue(feature, 1);
     Serial.print("Server: set features");
   }
 }
 
 
 
+// notify CP
 void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int lastcrank) {
 
+  // CP 32 bit/0-31 - 4/5:crankRev 3/4:wheelRev
+  byte feature[1] = { 0b00000000000000000000000000001100 };
+  byte measurement[16] = { 0b0000000000110000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
   // set measurement
-  cpMeasurement[2] = power & 0xFF;
-  cpMeasurement[3] = (power >> 8) & 0xFF;
+  measurement[2] = power & 0xFF;
+  measurement[3] = (power >> 8) & 0xFF;
 
-  cpMeasurement[4] = wheelrev & 0xFF;
-  cpMeasurement[5] = (wheelrev >> 8) & 0xFF;
-  cpMeasurement[6] = (wheelrev >> 16) & 0xFF;
-  cpMeasurement[7] = (wheelrev >> 24) & 0xFF;
+  measurement[4] = wheelrev & 0xFF;
+  measurement[5] = (wheelrev >> 8) & 0xFF;
+  measurement[6] = (wheelrev >> 16) & 0xFF;
+  measurement[7] = (wheelrev >> 24) & 0xFF;
 
-  cpMeasurement[8] = lastwheel & 0xFF;
-  cpMeasurement[9] = (lastwheel >> 8) & 0xFF;
+  measurement[8] = lastwheel & 0xFF;
+  measurement[9] = (lastwheel >> 8) & 0xFF;
 
-  cpMeasurement[10] = crankrev & 0xFF;
-  cpMeasurement[11] = (crankrev >> 8) & 0xFF;
+  measurement[10] = crankrev & 0xFF;
+  measurement[11] = (crankrev >> 8) & 0xFF;
 
-  cpMeasurement[12] = lastcrank & 0xFF;
-  cpMeasurement[13] = (lastcrank >> 8) & 0xFF;
+  measurement[12] = lastcrank & 0xFF;
+  measurement[13] = (lastcrank >> 8) & 0xFF;
 
   // connection state
   bool disconnecting = !deviceConnected && oldDeviceConnected;
   bool connecting = deviceConnected && !oldDeviceConnected;
 
-  // notify with data if connected
+  // notify with measurements if connected
   if (deviceConnected) {
-    cpMeasurementCharacteristics.setValue(cpMeasurement, 16);
-    cpMeasurementCharacteristics.notify();
+    measurementCharacteristics.setValue(measurement, 16);
+    measurementCharacteristics.notify();
     Serial.print(">> client");
   }
 
@@ -382,10 +359,13 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
   if (connecting) {
     Serial.println("\nClient: connected");
     oldDeviceConnected = deviceConnected;
-    cpFeatureCharacteristics.setValue(cpFeature, 1);
+    featureCharacteristics.setValue(feature, 1);
     Serial.print("Server: set features");
   }
 }
+
+
+
 
 
 
@@ -395,11 +375,12 @@ void loop() {
   unsigned long sMag;
   unsigned long nMag;
 
+
   // count rev
   unsigned long sampleTime = millis() - elapsedSampleTime;
   bool revState = digitalRead(PIN_REV);
 
-  if (sampleTime > 200 && revState != revStateOld) {
+  if (sampleTime > 50 && revState != revStateOld) {
     if (risingEdge(revStateOld, revState)) {
       elapsedSampleTime = millis();
       rev++;
@@ -409,21 +390,23 @@ void loop() {
   delay(20);
   digitalWrite(PIN_LED, LOW);
 
+
   // count mag
   sMag += (int)analogRead(PIN_MAG);
-  nMag ++;
+  nMag++;
+
 
   // notify every second
   if (intervalTime > 1000) {
 
-// cadence
+    // cadence
 #if defined(SIMULATION)
-    // simulation
+    // simulated
     cadence = 80;  // 80/100 > 30.0/37.5 kph
     crankrev = crankrev + 1;
     lastcrank = lastcrank + 1024 * 60 / cadence;
 #else
-    // actual
+    // measured
     crankrev = rev;
     lastcrank = elapsedSampleTime;
 #endif
@@ -437,11 +420,11 @@ void loop() {
     lastwheel = lastcrank * 2;  // 1s/2048 granularity
 #endif
 
-// power
+    // power
 #if defined(SIMULATION)
     power = 160;
 #else
-    power = (int)(100 * sMag / (nMag * 4095));
+    power = (int)(100 * (1 - (sMag / (nMag * 4095))));
 #endif
 
 //double kph = calculateKphFromRpm(rpm);
