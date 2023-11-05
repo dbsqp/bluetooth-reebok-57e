@@ -6,6 +6,10 @@
     updated for Reebok 5.7e indoor exercise bike by dbsqp
 */
 
+// TODO : sleep timer based on last trigger
+// TODO : aligh device/code cadance
+// TODO : only report power if pedelling
+
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -15,14 +19,14 @@
 
 
 // options
-//#define DEBUG
+#define DEBUG
 //#define CSC_MODE
 //#define SIMULATION
 
-#define PIN_REV 13  // Cadance reed-switch (trigger pulls low, sense via PNP)
-#define PIN_MAG 14  // Resistance Magnet (5V 1kHz PWM, sense via NPN)
-#define PIN_LED 32  // NOTE GPIO 2 onboard LED = ESP32 UART activity
-#define SERVER_NAME "Reebok 5.7e Bike"
+#define PIN_REV 13 // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
+#define PIN_MAG 14 // electromagnet (5V 1kHz PWM, analogue sense via NPN)
+#define TMSLEEP 60 // minuites on inactivity until sleep
+#define SERVER_NAME "Reebok 5.7e Bike" // Bluetooth device name
 
 
 
@@ -42,12 +46,17 @@ BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacter
 BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);
 #endif
 
+RTC_DATA_ATTR int bootCount = 0;
+int sleepMins = TMSLEEP;
+
 bool revStateOld;
 
 unsigned long elapsedTime;
 unsigned long elapsedSampleTime;
 unsigned long rev;  // rev trigger
 unsigned long mag;  // mag PWM
+unsigned long sMag;
+unsigned long nMag;
 
 uint16_t crankrev;   // Cadence RPM
 uint16_t lastcrank;  // Last crank time
@@ -78,13 +87,14 @@ class MyServerCallbacks : public BLEServerCallbacks {
 // main setup
 void setup() {
   Serial.begin(115200);
-  Serial.println("Startup");
+  Serial.print("\n Start");
 
-  setupLED();
-  setupBluetoothServer();
+  setupSleep();
   setupRevSensor();
   setupMagSensor();
+  setupBluetoothServer();
 
+  rev = 0;
   elapsedTime = 0;
   elapsedSampleTime = 0;
 
@@ -99,21 +109,34 @@ void setup() {
 
 
 
-// setup LED
-void setupLED() {
-  pinMode(PIN_LED, OUTPUT);
+// setup sleep
+void setupSleep() {
+  ++bootCount;
+  Serial.printf(" : %d\n", bootCount);
+  Serial.printf(" sleep : %d mins [ %d ms ]\n", sleepMins, sleepMins*60*1000);
+}
+
+// setup cadance sensor reed > GND
+void setupRevSensor() {
+  pinMode(PIN_REV, INPUT);
+  revStateOld = digitalRead(PIN_REV);
+}
+
+// setup resistance sensor PWM > analogue
+void setupMagSensor() {
+  pinMode(PIN_MAG, INPUT);
 }
 
 
 
-// setup BLE
+// setup Bluetooth
 void setupBluetoothServer() {
 
-  // create BLE device
+  // create device
   BLEDevice::init(SERVER_NAME);
   Serial.print("Server : " SERVER_NAME);
 
-  // create BLE server
+  // create server
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
@@ -164,18 +187,6 @@ void setupBluetoothServer() {
 
 
 
-// setup cadance sensor
-void setupRevSensor() {
-  pinMode(PIN_REV, INPUT);
-  revStateOld = digitalRead(PIN_REV);
-}
-
-
-
-// setup resistance sensor
-void setupMagSensor() {
-  pinMode(PIN_MAG, INPUT);
-}
 
 
 
@@ -188,9 +199,9 @@ inline bool risingEdge(bool &oldState, bool state) {
 
 #if defined(DEBUG)
   if (result) {
-    Serial.printf("edge: / %d%d = %d trigger\n", oldState, state, result);
+    Serial.printf("  edge : / %d%d = %d trigger\n", oldState, state, result);
   } else {
-    Serial.printf("edge:  \\ %d%d = %d\n", oldState, state, result);
+    Serial.printf("  edge :  \\ %d%d = %d\n", oldState, state, result);
   }
 #endif
 
@@ -206,9 +217,9 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
 #if defined(DEBUG)
   if (!result) {
-    Serial.printf("edge: / %d%d = %d\n", oldState, state, result);
+    Serial.printf("  edge : / %d%d = %d\n", oldState, state, result);
   } else {
-    Serial.printf("edge: \\ %d%d = %d trigger\n", oldState, state, result);
+    Serial.printf("  edge : \\ %d%d = %d trigger\n", oldState, state, result);
   }
 #endif
 
@@ -219,18 +230,16 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
 
 // calculations
-double calculateKphFromRpm(double rpm) {
-  double WHEEL_RADIUS = 0.00034;  // in km
-  double KM_TO_MI = 0.621371;
-
-  double circumfrence = 2 * PI * WHEEL_RADIUS;
-  double metricDistance = rpm * circumfrence;
-  double kph = metricDistance * 60;
-  // Serial.printf("rpm: %2.2f, circumfrence: %2.2f, distance %2.5f , speed: %2.2f \n", rpm, circumfrence, metricDistance, kmh);
+double calculateKphFromRev(double rev) {
+  double ratio = 1.0;
+  double rpm = rev * ratio;
+  double diamater = 700;  // in mm
+  double circumfrence = PI * diamater;
+  double distance = rpm * circumfrence * 1000000; // km
+  double kph = distance * 60;
   return kph;
 }
 
-unsigned long caloriesTime = 0;
 double calculatePowerFromKph(double kph) {
   double velocity = kph * 0.2777;  // m/s
   double riderWeight = 72.0;       // kg
@@ -372,11 +381,8 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
 // main loop
 void loop() {
   unsigned long intervalTime = millis() - elapsedTime;
-  unsigned long sMag;
-  unsigned long nMag;
 
-
-  // count rev
+  // count crank revolutions
   unsigned long sampleTime = millis() - elapsedSampleTime;
   bool revState = digitalRead(PIN_REV);
 
@@ -384,19 +390,23 @@ void loop() {
     if (risingEdge(revStateOld, revState)) {
       elapsedSampleTime = millis();
       rev++;
-      digitalWrite(PIN_LED, HIGH);
     }
   }
-  delay(20);
-  digitalWrite(PIN_LED, LOW);
+
+  // measure average electromagnet signal
+  mag = (int)analogRead(PIN_MAG);
+
+  // add logic to report zero power when not pedelling
+  // if pedeling (rev in last two seconds C = 30) and not max (PWM glitch)
+  // if (sampleTime < 2000 && mag != 4095) {
+     sMag += mag;
+     nMag++;
+     mag = sMag/nMag;
+  // }
 
 
-  // count mag
-  sMag += (int)analogRead(PIN_MAG);
-  nMag++;
 
-
-  // notify every second
+  // notify bluetooth client every second
   if (intervalTime > 1000) {
 
     // cadence
@@ -422,27 +432,51 @@ void loop() {
 
     // power
 #if defined(SIMULATION)
-    power = 160;
+    power = 123;
 #else
-    power = (int)(100 * (1 - (sMag / (nMag * 4095))));
+//    power = (int)(100 * (1 - (sMag / (nMag * 4095))));
+    unsigned long vPin = (int)(3300.0 * mag/4095);
+    unsigned long vPWM = (int)(5000.0 - (5000.0 * mag/4095));
+    unsigned long DUTY = (int)( 100.0 * vPWM/4348);
+    power = (int)(100.0 * ( vPWM/5000));
 #endif
 
-//double kph = calculateKphFromRpm(rpm);
-//double power = calculatePowerFromKph(kph);
-
-// serial output & notify
+    // serial output
+#if defined(DEBUG)
+    Serial.printf("ST %6d vPIN %4d vPWM %4d DUTY %4d ", sampleTime, vPin, vPWM, DUTY);
 #if defined(CSC_MODE)
-    Serial.printf("WR %4d WT %7d CR %4d CT %7d ", wheelrev, lastwheel, crankrev, lastcrank);
+    Serial.printf("WR %4d WT %7d CR %4d CT %7d\n", wheelrev, lastwheel, crankrev, lastcrank);
+#else
+    Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d\n", power, wheelrev, lastwheel, crankrev, lastcrank);
+#endif
+#endif
+
+    // notify
+#if defined(CSC_MODE)
     serviceNotifyCSC(wheelrev, lastwheel, crankrev, lastcrank);
 #else
-    Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d ", power, wheelrev, lastwheel, crankrev, lastcrank);
     serviceNotifyCP(power, wheelrev, lastwheel, crankrev, lastcrank);
 #endif
-    Serial.printf("\n");
 
-    // loop varables
+    // update loop variables
     sMag = 0;
     nMag = 0;
     elapsedTime = millis();
+
+    // sleep 
+    if (sampleTime > sleepMins*60*1000 ) {
+      #if defined(DEBUG)
+        Serial.println("Sleep - trigger crank sensor to wake!\n");
+      #endif
+
+      // shutdown bluetooth
+      esp_bt_controller_disable();
+
+      // external wake via crank reed low > PNP high
+      esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
+
+      // sleep
+      esp_deep_sleep_start();
+    }
   }
 }

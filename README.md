@@ -37,13 +37,16 @@ Unfinished, under developement.
 1. Create prototype interface circuit from reed switch to ESP32 [TIP125 PNP common GND, base to GPIO]
 1. Assess power on/off with bike computer [powers up on wake, powers down on sleep]
 1. Access direct resistance sensor [5V 1 kHz PMW tap at MOSFET to optocoupler on main PCB]
-1. Create final interface board [proto board, socketed ESP32, power/sensor in headers, scope test points, strain relief, VCC in switch for USB power/debug]
+1. Create interface board [proto board, socketed ESP32, power/sensor in headers, scope test points, strain relief, VCC in switch for USB power/debug]
 1. Fix broken resistance function [burnt out resistor to optocoupler out]
 1. Assess power on/off with bike computer [programming header always powered]
+1. Create prototype interface circuit from PMW signal to ESP32 [TIP120 NPN, base to PWM]
+1. Calculate primary resistance metric as PWM duty-cycle (D) [100% = high resistance, 0% = no resistance]
+1. finalise interface board [implement PWM circuit, insulation, robust physical mount]
+1. Implement sleep timer [deep sleep after inactivity, wake on crank sensor]
+1. Measure magnet duty-cycle at given cadance [80,100,120] and power [100,160, 240]
 
 ### Todo
-1. Finalise code to report valid rotation metrics
-1. Create prototype interface circuit from PMW signal to ESP32
-1. Implement standby/disconnect on idle (robust power down)
-1. Reverse engineer power (P) as a function of cadance (C) and resistance (PWM): Fix P/C measure PWM -> P=f(C,PWM)
-1. Update code to report valid resistance metrics
+1. Finalise code to report correct cadance
+1. Reverse engineer power function: P = f(C,D)
+1. Update code to report correct power
