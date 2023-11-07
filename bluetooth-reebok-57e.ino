@@ -1,13 +1,15 @@
 /*
+    ESP32 interface for Reebok 5.7e indoor exercise bike
+
     Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleServer.cpp
     Ported to Arduino ESP32 by Evandro Copercini
     updates by chegewara
     based on esp32-ftms-server by jamesjmtaylor
-    updated for Reebok 5.7e indoor exercise bike by dbsqp
+    updated for Cadance/Speed, Power and Reebok 5.7 by dbsqp
 */
 
-// TODO : sleep timer based on last trigger
-// TODO : aligh device/code cadance
+// TODO : report cadance, speed, distance and power from speed in debug
+// TODO : implement final power = f(cadance, resistance)
 // TODO : only report power if pedelling
 
 #include <BLEDevice.h>
@@ -23,14 +25,18 @@
 //#define CSC_MODE
 //#define SIMULATION
 
-#define PIN_REV 13 // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
-#define PIN_MAG 14 // electromagnet (5V 1kHz PWM, analogue sense via NPN)
-#define TMSLEEP 60 // minuites on inactivity until sleep
+#define PIN_REED 13 // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
+#define PIN_EMAG 14 // electromagnet (5V 1kHz PWM, analogue sense via NPN)
+#define TMSLEEP 3.5 // minuites on inactivity until sleep - match bike sleep of 3.5 mins
 #define SERVER_NAME "Reebok 5.7e Bike" // Bluetooth device name
 
 
 
 // globals
+RTC_DATA_ATTR int bootCount = 0;
+double sleepMins = TMSLEEP;
+
+
 BLEServer *pServer;
 
 // https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
@@ -46,28 +52,25 @@ BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacter
 BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);
 #endif
 
-RTC_DATA_ATTR int bootCount = 0;
-int sleepMins = TMSLEEP;
-
-bool revStateOld;
-
-unsigned long elapsedTime;
-unsigned long elapsedSampleTime;
-unsigned long rev;  // rev trigger
-unsigned long mag;  // mag PWM
-unsigned long sMag;
-unsigned long nMag;
-
-uint16_t crankrev;   // Cadence RPM
-uint16_t lastcrank;  // Last crank time
-uint32_t wheelrev;   // Wheel revolutions
-uint16_t lastwheel;  // Last crank time
-uint16_t power;      // power [Watts]
-
-uint16_t cadence;
-
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+
+
+bool oldReedState;
+
+unsigned long lastNotify;   // time last notify
+unsigned long lastTrigger;  // time last trigger
+unsigned long triggerCount; // trigger count
+unsigned long mag;          // analogue input read of electromagnet PWM
+unsigned long sMag;         //   sum of analogue input reads between notifications
+unsigned long nMag;         // count of analogue input reads between notifications
+
+uint16_t crankCount;        // count rank revolutions
+uint16_t lastCrank;         // time last crank revolution
+uint32_t wheelCount;        // count wheel revolutions
+uint16_t lastWheel;         // time last wheel revolution 
+uint16_t power;             // power in Watts
+uint16_t cadence;           // crank revolutions per minuite
 
 
 
@@ -94,17 +97,17 @@ void setup() {
   setupMagSensor();
   setupBluetoothServer();
 
-  rev = 0;
-  elapsedTime = 0;
-  elapsedSampleTime = 0;
+    lastNotify = 0;
+   lastTrigger = 0;
 
-  rev = 0;
-  mag = 0;
-  crankrev = 0;
-  lastcrank = 0;
-  wheelrev = 0;
-  lastwheel = 0;
-  power = 0;
+  triggerCount = 0;
+           mag = 0;
+
+    crankCount = 0;
+     lastCrank = 0;
+    wheelCount = 0;
+     lastWheel = 0;
+         power = 0;
 }
 
 
@@ -118,13 +121,13 @@ void setupSleep() {
 
 // setup cadance sensor reed > GND
 void setupRevSensor() {
-  pinMode(PIN_REV, INPUT);
-  revStateOld = digitalRead(PIN_REV);
+  pinMode(PIN_REED, INPUT);
+  oldReedState = digitalRead(PIN_REED);
 }
 
 // setup resistance sensor PWM > analogue
 void setupMagSensor() {
-  pinMode(PIN_MAG, INPUT);
+  pinMode(PIN_EMAG, INPUT);
 }
 
 
@@ -139,7 +142,6 @@ void setupBluetoothServer() {
   // create server
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-
 
 #if defined(CSC_MODE)
   Serial.print(" - Cadence [BLE/CSC]");
@@ -190,18 +192,13 @@ void setupBluetoothServer() {
 
 
 
-
-
-
 // rising edge trigger function
 inline bool risingEdge(bool &oldState, bool state) {
   bool result = (!oldState && state);  // !0 && 1
 
 #if defined(DEBUG)
   if (result) {
-    Serial.printf("  edge : / %d%d = %d trigger\n", oldState, state, result);
-  } else {
-    Serial.printf("  edge :  \\ %d%d = %d\n", oldState, state, result);
+    Serial.println("DEBUG trigger _/");
   }
 #endif
 
@@ -217,9 +214,7 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
 #if defined(DEBUG)
   if (!result) {
-    Serial.printf("  edge : / %d%d = %d\n", oldState, state, result);
-  } else {
-    Serial.printf("  edge : \\ %d%d = %d trigger\n", oldState, state, result);
+    Serial.println("DEBUG trigger \\_");
   }
 #endif
 
@@ -295,7 +290,7 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   if (deviceConnected) {
     measurementCharacteristics.setValue(measurement, 11);
     measurementCharacteristics.notify();
-    Serial.print(">> client");
+    Serial.print(" >> client");
   }
 
   // restart advertising if disconnected
@@ -352,7 +347,7 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
   if (deviceConnected) {
     measurementCharacteristics.setValue(measurement, 16);
     measurementCharacteristics.notify();
-    Serial.print(">> client");
+    Serial.print(" >> client");
   }
 
   // restart advertising if disconnected
@@ -380,94 +375,100 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
 
 // main loop
 void loop() {
-  unsigned long intervalTime = millis() - elapsedTime;
+  unsigned long sinceNotify = millis() - lastNotify;    // ms since last notify
+
 
   // count crank revolutions
-  unsigned long sampleTime = millis() - elapsedSampleTime;
-  bool revState = digitalRead(PIN_REV);
+  unsigned long sinceTrigger = millis() - lastTrigger;  // ms since last trigger
 
-  if (sampleTime > 50 && revState != revStateOld) {
-    if (risingEdge(revStateOld, revState)) {
-      elapsedSampleTime = millis();
-      rev++;
+  bool reedState = digitalRead(PIN_REED);
+
+  if (sinceTrigger > 400 && reedState != oldReedState) {
+    if (fallingEdge(oldReedState, reedState)) {
+      lastTrigger = millis();
+      triggerCount++;
     }
   }
 
-  // measure average electromagnet signal
-  mag = (int)analogRead(PIN_MAG);
+
+  // average electromagnet PWM voltage
+  mag = (int)analogRead(PIN_EMAG);
 
   // add logic to report zero power when not pedelling
   // if pedeling (rev in last two seconds C = 30) and not max (PWM glitch)
-  // if (sampleTime < 2000 && mag != 4095) {
+  // if (sinceTrigger < 2000 && mag != 4095) {
      sMag += mag;
-     nMag++;
-     mag = sMag/nMag;
+     nMag ++;
   // }
 
 
 
-  // notify bluetooth client every second
-  if (intervalTime > 1000) {
+
+
+  // notify bluetooth client every 2 seconds
+  if (sinceNotify > 2000) {
 
     // cadence
 #if defined(SIMULATION)
     // simulated
-    cadence = 80;  // 80/100 > 30.0/37.5 kph
-    crankrev = crankrev + 1;
-    lastcrank = lastcrank + 1024 * 60 / cadence;
+       cadence = 80;  // 80/100 > 30.0/37.5 kph
+    crankCount ++;
+     lastCrank += 1024 * 60 / cadence;
 #else
     // measured
-    crankrev = rev;
-    lastcrank = elapsedSampleTime;
+    crankCount = triggerCount;
+     lastCrank = lastTrigger;
 #endif
 
-    // wheel rev - based on Apple Watch default wheel dimension 700c x 2.5mm
-    wheelrev = crankrev * 3;
+    // wheel rev
+    // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
+    wheelCount = crankCount * 3;
 
 #if defined(CSC_MODE)
-    lastwheel = lastcrank * 1;  // 1s/1024 granularity
+    lastWheel = lastCrank * 1;  // 1/1024 s granularity
 #else
-    lastwheel = lastcrank * 2;  // 1s/2048 granularity
+    lastWheel = lastCrank * 2;  // 1/2048 s granularity
 #endif
 
     // power
 #if defined(SIMULATION)
     power = 123;
 #else
-//    power = (int)(100 * (1 - (sMag / (nMag * 4095))));
-    unsigned long vPin = (int)(3300.0 * mag/4095);
-    unsigned long vPWM = (int)(5000.0 - (5000.0 * mag/4095));
-    unsigned long DUTY = (int)( 100.0 * vPWM/4348);
-    power = (int)(100.0 * ( vPWM/5000));
+    double aMag = sMag/nMag;
+    double vPIN = 3.3 * aMag/4095;
+    double vPWM = 5.0 - (5.0 * aMag/4095);
+    double DUTY = 100.0 * vPWM/4348;
+    power = (int)(1 * DUTY);
 #endif
 
     // serial output
 #if defined(DEBUG)
-    Serial.printf("ST %6d vPIN %4d vPWM %4d DUTY %4d ", sampleTime, vPin, vPWM, DUTY);
-#if defined(CSC_MODE)
-    Serial.printf("WR %4d WT %7d CR %4d CT %7d\n", wheelrev, lastwheel, crankrev, lastcrank);
-#else
-    Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d\n", power, wheelrev, lastwheel, crankrev, lastcrank);
+    Serial.printf("ST %6d vPIN %4.2f vPWM %4.2f DUTY %5.1f ", sinceTrigger, vPIN, vPWM, DUTY);
 #endif
+
+#if defined(CSC_MODE)
+    Serial.printf("#W %4d WT %7d #C %4d CT %7d", wheelCount, lastWheel, crankCount, lastCrank);
+#else
+    Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d", power, wheelCount, lastWheel, crankCount, lastCrank);
 #endif
 
     // notify
 #if defined(CSC_MODE)
-    serviceNotifyCSC(wheelrev, lastwheel, crankrev, lastcrank);
+    serviceNotifyCSC(wheelCount, lastWheel, crankCount, lastCrank);
 #else
-    serviceNotifyCP(power, wheelrev, lastwheel, crankrev, lastcrank);
+    serviceNotifyCP(power, wheelCount, lastWheel, crankCount, lastCrank);
 #endif
 
-    // update loop variables
+    Serial.println("");
+
+    // reset loop variables
     sMag = 0;
     nMag = 0;
-    elapsedTime = millis();
+    lastNotify = millis();
 
     // sleep 
-    if (sampleTime > sleepMins*60*1000 ) {
-      #if defined(DEBUG)
-        Serial.println("Sleep - trigger crank sensor to wake!\n");
-      #endif
+    if (sinceTrigger > sleepMins*60*1000 ) {
+      Serial.println("Sleep - trigger crank sensor to wake!\n");
 
       // shutdown bluetooth
       esp_bt_controller_disable();
