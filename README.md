@@ -45,8 +45,10 @@ Unfinished, under developement.
 1. finalise interface board [implement PWM circuit, insulation, robust physical mount]
 1. Implement sleep timer [deep sleep after inactivity, wake on crank sensor]
 1. Measure magnet duty-cycle at given cadance [80,100,120] and power [100,160, 240]
-1. Finalise code to report correct cadance
+1. Finalise code to report correct cadance [notify every 2 seconds]
+1. Report approx power based on speed and terminal velocity
+1. Report duty-cycle as power to collect bulk correlation data [download CSV for workout from iOS Health]
 
 ### Todo
 1. Reverse engineer power function: P = f(C,D)
-1. Update code to report approx power using power function
+1. Decide to use f(C,D) or approximation for power.

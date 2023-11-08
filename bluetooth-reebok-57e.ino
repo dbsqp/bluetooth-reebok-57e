@@ -8,7 +8,6 @@
     updated for Cadance/Speed, Power and Reebok 5.7 by dbsqp
 */
 
-// TODO : report cadance, speed, distance and power from speed in debug
 // TODO : implement final power = f(cadance, resistance)
 // TODO : only report power if pedelling
 
@@ -25,17 +24,17 @@
 //#define CSC_MODE
 //#define SIMULATION
 
-#define PIN_REED 13 // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
-#define PIN_EMAG 14 // electromagnet (5V 1kHz PWM, analogue sense via NPN)
-#define TMSLEEP 3.5 // minuites on inactivity until sleep - match bike sleep of 3.5 mins
+#define PIN_REED 13  // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
+#define PIN_EMAG 14  // electromagnet (5V 1kHz PWM, analogue sense via NPN)
+#define SLEEPMIN 3.5 // minuites on inactivity until sleep - match bike sleep of 3.5 mins
 #define SERVER_NAME "Reebok 5.7e Bike" // Bluetooth device name
 
 
 
 // globals
 RTC_DATA_ATTR int bootCount = 0;
-double sleepMins = TMSLEEP;
-
+double sleepTriggerMin = SLEEPMIN;
+int sleepTrigger = (int)( sleepTriggerMin * 60 * 1000 );
 
 BLEServer *pServer;
 
@@ -72,6 +71,7 @@ uint16_t lastWheel;         // time last wheel revolution
 uint16_t power;             // power in Watts
 uint16_t cadence;           // crank revolutions per minuite
 
+double speed;               // speed in km/h
 
 
 // connection status
@@ -110,13 +110,11 @@ void setup() {
          power = 0;
 }
 
-
-
 // setup sleep
 void setupSleep() {
   ++bootCount;
   Serial.printf(" : %d\n", bootCount);
-  Serial.printf(" sleep : %d mins [ %d ms ]\n", sleepMins, sleepMins*60*1000);
+  Serial.printf(" Sleep : %.1f mins [ %'d ms ]\n", sleepTriggerMin, sleepTrigger );
 }
 
 // setup cadance sensor reed > GND
@@ -129,8 +127,6 @@ void setupRevSensor() {
 void setupMagSensor() {
   pinMode(PIN_EMAG, INPUT);
 }
-
-
 
 // setup Bluetooth
 void setupBluetoothServer() {
@@ -189,9 +185,6 @@ void setupBluetoothServer() {
 
 
 
-
-
-
 // rising edge trigger function
 inline bool risingEdge(bool &oldState, bool state) {
   bool result = (!oldState && state);  // !0 && 1
@@ -205,8 +198,6 @@ inline bool risingEdge(bool &oldState, bool state) {
   oldState = state;
   return result;
 }
-
-
 
 // falling edge trigger function
 inline bool fallingEdge(bool &oldState, bool state) {
@@ -225,17 +216,7 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
 
 // calculations
-double calculateKphFromRev(double rev) {
-  double ratio = 1.0;
-  double rpm = rev * ratio;
-  double diamater = 700;  // in mm
-  double circumfrence = PI * diamater;
-  double distance = rpm * circumfrence * 1000000; // km
-  double kph = distance * 60;
-  return kph;
-}
-
-double calculatePowerFromKph(double kph) {
+double powerFromSpeed(double kph) {
   double velocity = kph * 0.2777;  // m/s
   double riderWeight = 72.0;       // kg
   double bikeWeight = 12.0;        // kg
@@ -252,7 +233,6 @@ double calculatePowerFromKph(double kph) {
   double A2 = 0.5 * frontalArea * density;        // full air resistance parameter
   double tres = twt * (grade + rollingRes);       // gravity and rolling resistance
 
-  // we calculate power from velocity
   double tv = velocity + headwind;       // terminal velocity
   double A2Eff = (tv > 0.0) ? A2 : -A2;  // reverse effect wind in face
   return (velocity * tres + velocity * tv * tv * A2Eff) / transv;
@@ -312,8 +292,6 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   }
 }
 
-
-
 // notify CP
 void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int lastcrank) {
 
@@ -370,9 +348,6 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
 
 
 
-
-
-
 // main loop
 void loop() {
   unsigned long sinceNotify = millis() - lastNotify;    // ms since last notify
@@ -390,7 +365,6 @@ void loop() {
     }
   }
 
-
   // average electromagnet PWM voltage
   mag = (int)analogRead(PIN_EMAG);
 
@@ -402,11 +376,8 @@ void loop() {
   // }
 
 
-
-
-
   // notify bluetooth client every 2 seconds
-  if (sinceNotify > 2000) {
+  if (sinceNotify >= 2000) {
 
     // cadence
 #if defined(SIMULATION)
@@ -416,18 +387,32 @@ void loop() {
      lastCrank += 1024 * 60 / cadence;
 #else
     // measured
+      if ( lastCrank != 0 && triggerCount > crankCount ) {
+        cadence = (int)( ( triggerCount - crankCount ) / ( ( lastTrigger - lastCrank ) / ( 1000*60.0 ) ) );
+      } else {
+        cadence = 0;
+      }
     crankCount = triggerCount;
      lastCrank = lastTrigger;
 #endif
 
     // wheel rev
     // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
+    // NOTE : 3 is theoretical crank:wheel gear ratio 
     wheelCount = crankCount * 3;
 
 #if defined(CSC_MODE)
     lastWheel = lastCrank * 1;  // 1/1024 s granularity
 #else
     lastWheel = lastCrank * 2;  // 1/2048 s granularity
+#endif
+
+    // speed
+#if defined(SIMULATION)
+    speed = 32.1;
+#else
+    // NOTE : 2.13 m is circumference of 700c
+    speed = cadence * 3 * 2.13 * 60 / 1000;
 #endif
 
     // power
@@ -437,20 +422,23 @@ void loop() {
     double aMag = sMag/nMag;
     double vPIN = 3.3 * aMag/4095;
     double vPWM = 5.0 - (5.0 * aMag/4095);
-    double DUTY = 100.0 * vPWM/4348;
-    power = (int)(1 * DUTY);
+//    double DUTY = 100.0 * vPWM/4.348;
+    double DUTY = 100.0 * vPWM/5.0;
+    power = (int)(DUTY);
 #endif
+
 
     // serial output
 #if defined(DEBUG)
-    Serial.printf("ST %6d vPIN %4.2f vPWM %4.2f DUTY %5.1f ", sinceTrigger, vPIN, vPWM, DUTY);
+    Serial.printf("ST %7d vPIN %4.2f vPWM %4.2f DUTY %5.1f CAD %3d KPH %4.1f PWR' %5.1f : ", sinceTrigger, vPIN, vPWM, DUTY, cadence, speed, powerFromSpeed(speed));
 #endif
 
 #if defined(CSC_MODE)
-    Serial.printf("#W %4d WT %7d #C %4d CT %7d", wheelCount, lastWheel, crankCount, lastCrank);
+    Serial.printf("WR %4d WT %7d CR %4d CT %7d", wheelCount, lastWheel, crankCount, lastCrank);
 #else
-    Serial.printf("PW %4d WR %4d WT %7d CR %4d CT %7d", power, wheelCount, lastWheel, crankCount, lastCrank);
+    Serial.printf("PWR %4d WR %4d WT %7d CR %4d CT %7d", power, wheelCount, lastWheel, crankCount, lastCrank);
 #endif
+
 
     // notify
 #if defined(CSC_MODE)
@@ -461,13 +449,15 @@ void loop() {
 
     Serial.println("");
 
+
     // reset loop variables
     sMag = 0;
     nMag = 0;
     lastNotify = millis();
 
+
     // sleep 
-    if (sinceTrigger > sleepMins*60*1000 ) {
+    if (sinceTrigger >= sleepTrigger ) {
       Serial.println("Sleep - trigger crank sensor to wake!\n");
 
       // shutdown bluetooth
