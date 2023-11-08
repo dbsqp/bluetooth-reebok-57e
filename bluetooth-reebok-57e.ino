@@ -8,6 +8,9 @@
     updated for Cadance/Speed, Power and Reebok 5.7 by dbsqp
 */
 
+// NOTE : onboard LED indicates UART activity
+// NOTE : hallRead threshold needs to be adjusted for install
+
 // TODO : implement final power = f(cadance, resistance)
 // TODO : only report power if pedelling
 
@@ -20,9 +23,11 @@
 
 
 // options
-#define DEBUG
-//#define CSC_MODE
-//#define SIMULATION
+#define DEBUG       // add debug header to serial output
+//#define USEHALL     // use builtin hall effect sensor of ESP32 to as crank trigger
+#define DOSLEEP     // sleep and wake via PIN_REED
+//#define CSC_MODE    // create Cadence & Speed sensor instead of Power, Cadence & Speed
+//#define SIMULATION  // report simulted number instead of measurements
 
 #define PIN_REED 13  // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
 #define PIN_EMAG 14  // electromagnet (5V 1kHz PWM, analogue sense via NPN)
@@ -40,22 +45,22 @@ BLEServer *pServer;
 
 // https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 #if defined(CSC_MODE)
-#define SERVICE_UUID BLEUUID((uint16_t)0x1816)
-BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A5C), BLECharacteristic::PROPERTY_READ);
-BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A5B), BLECharacteristic::PROPERTY_NOTIFY);
-BLECharacteristic scControlPointCharacteristics(BLEUUID((uint16_t)0x2A55), BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_INDICATE);
-BLEDescriptor scControlPointDescriptor(BLEUUID((uint16_t)0x2901));
+  #define SERVICE_UUID BLEUUID((uint16_t)0x1816)
+  BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A5C), BLECharacteristic::PROPERTY_READ);
+  BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A5B), BLECharacteristic::PROPERTY_NOTIFY);
+  BLECharacteristic scControlPointCharacteristics(BLEUUID((uint16_t)0x2A55), BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_INDICATE);
+  BLEDescriptor scControlPointDescriptor(BLEUUID((uint16_t)0x2901));
 #else
-#define SERVICE_UUID BLEUUID((uint16_t)0x1818)
-BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacteristic::PROPERTY_READ);
-BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);
+  #define SERVICE_UUID BLEUUID((uint16_t)0x1818)
+  BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacteristic::PROPERTY_READ);
+  BLECharacteristic measurementCharacteristics(BLEUUID((uint16_t)0x2A63), BLECharacteristic::PROPERTY_NOTIFY);
 #endif
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 
-bool oldReedState;
+bool oldState;              // crank sensor state
 
 unsigned long lastNotify;   // time last notify
 unsigned long lastTrigger;  // time last trigger
@@ -92,8 +97,16 @@ void setup() {
   Serial.begin(115200);
   Serial.print("\n Start");
 
-  setupSleep();
-  setupRevSensor();
+  #if defined(DOSLEEP)
+    setupSleep();
+  #endif
+
+  #if defined(USEHALL)
+    setupHallSensor();
+  #else
+    setupRevSensor();
+  #endif
+
   setupMagSensor();
   setupBluetoothServer();
 
@@ -120,12 +133,17 @@ void setupSleep() {
 // setup cadance sensor reed > GND
 void setupRevSensor() {
   pinMode(PIN_REED, INPUT);
-  oldReedState = digitalRead(PIN_REED);
+  oldState = digitalRead(PIN_REED);
 }
 
 // setup resistance sensor PWM > analogue
 void setupMagSensor() {
   pinMode(PIN_EMAG, INPUT);
+}
+
+// setup hall sensor
+void setupHallSensor() {
+  oldState = false;
 }
 
 // setup Bluetooth
@@ -139,17 +157,21 @@ void setupBluetoothServer() {
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-#if defined(CSC_MODE)
-  Serial.print(" - Cadence [BLE/CSC]");
-#else
-  Serial.print(" - Power [BLE/CP]");
-#endif
+  #if defined(CSC_MODE)
+    Serial.print(" - Cadence [BLE/CSC]");
+  #else
+    Serial.print(" - Power [BLE/CP]");
+  #endif
 
-#if defined(SIMULATION)
-  Serial.println(" - Simulation!");
-#else
-  Serial.println("");
-#endif
+  #if defined(SIMULATION)
+    Serial.println(" - Simulation!");
+  #else
+    #if defined(USEHALL)
+      Serial.println(" - Hall");
+    #else
+      Serial.println("");
+    #endif
+  #endif
 
   // create service & add measurement/features
   BLEService *pService = pServer->createService(SERVICE_UUID);
@@ -189,11 +211,11 @@ void setupBluetoothServer() {
 inline bool risingEdge(bool &oldState, bool state) {
   bool result = (!oldState && state);  // !0 && 1
 
-#if defined(DEBUG)
-  if (result) {
-    Serial.println("DEBUG trigger _/");
-  }
-#endif
+  #if defined(DEBUG)
+    if (result) {
+      Serial.println("DEBUG trigger _/");
+    }
+  #endif
 
   oldState = state;
   return result;
@@ -203,11 +225,11 @@ inline bool risingEdge(bool &oldState, bool state) {
 inline bool fallingEdge(bool &oldState, bool state) {
   bool result = (oldState && !state);  // 1 && !0
 
-#if defined(DEBUG)
-  if (!result) {
-    Serial.println("DEBUG trigger \\_");
-  }
-#endif
+  #if defined(DEBUG)
+    if (!result) {
+      Serial.println("DEBUG trigger \\_");
+    }
+  #endif
 
   oldState = state;
   return result;
@@ -355,11 +377,22 @@ void loop() {
 
   // count crank revolutions
   unsigned long sinceTrigger = millis() - lastTrigger;  // ms since last trigger
+  bool state;
 
-  bool reedState = digitalRead(PIN_REED);
+  #if defined(USEHALL)
+    // ESP32 build-in hall sensor
+    if ( abs(hallRead()) > 140 ) {
+      state = true;
+    } else {
+      state = false;
+    }
+  #else
+    // external reed sensor
+    state = digitalRead(PIN_REED);
+  #endif
 
-  if (sinceTrigger > 400 && reedState != oldReedState) {
-    if (fallingEdge(oldReedState, reedState)) {
+  if (sinceTrigger > 400 && state != oldState) {
+    if (fallingEdge(oldState, state)) {
       lastTrigger = millis();
       triggerCount++;
     }
@@ -380,72 +413,75 @@ void loop() {
   if (sinceNotify >= 2000) {
 
     // cadence
-#if defined(SIMULATION)
-    // simulated
-       cadence = 80;  // 80/100 > 30.0/37.5 kph
-    crankCount ++;
-     lastCrank += 1024 * 60 / cadence;
-#else
-    // measured
+    #if defined(SIMULATION)
+        // simulated
+           cadence = 80;  // 80/100 > 30.0/37.5 kph
+        crankCount ++;
+         lastCrank += 1024 * 60 / cadence;
+    #else
+      // measured
       if ( lastCrank != 0 && triggerCount > crankCount ) {
         cadence = (int)( ( triggerCount - crankCount ) / ( ( lastTrigger - lastCrank ) / ( 1000*60.0 ) ) );
       } else {
         cadence = 0;
       }
-    crankCount = triggerCount;
-     lastCrank = lastTrigger;
-#endif
+      crankCount = triggerCount;
+       lastCrank = lastTrigger;
+    #endif
 
     // wheel rev
     // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
     // NOTE : 3 is theoretical crank:wheel gear ratio 
     wheelCount = crankCount * 3;
 
-#if defined(CSC_MODE)
-    lastWheel = lastCrank * 1;  // 1/1024 s granularity
-#else
-    lastWheel = lastCrank * 2;  // 1/2048 s granularity
-#endif
+    #if defined(CSC_MODE)
+      lastWheel = lastCrank * 1;  // 1/1024 s granularity
+    #else
+      lastWheel = lastCrank * 2;  // 1/2048 s granularity
+    #endif
 
     // speed
-#if defined(SIMULATION)
-    speed = 32.1;
-#else
-    // NOTE : 2.13 m is circumference of 700c
-    speed = cadence * 3 * 2.13 * 60 / 1000;
-#endif
+    #if defined(SIMULATION)
+      speed = 32.1;
+    #else
+      // NOTE : 2.13 m is circumference of 700c
+      speed = cadence * 3 * 2.13 * 60 / 1000;
+    #endif
 
     // power
-#if defined(SIMULATION)
-    power = 123;
-#else
-    double aMag = sMag/nMag;
-    double vPIN = 3.3 * aMag/4095;
-    double vPWM = 5.0 - (5.0 * aMag/4095);
-//    double DUTY = 100.0 * vPWM/4.348;
-    double DUTY = 100.0 * vPWM/5.0;
-    power = (int)(DUTY);
-#endif
+    #if defined(SIMULATION)
+      power = 123;
+    #else
+      double aMag = sMag/nMag;
+      double vPIN = 3.3 * aMag/4095;
+      double vPWM = 5.0 - (5.0 * aMag/4095);
+      double DUTY = 100.0 * vPWM/4.348;
+      power = (int)(DUTY);
+    #endif
 
 
     // serial output
-#if defined(DEBUG)
-    Serial.printf("ST %7d vPIN %4.2f vPWM %4.2f DUTY %5.1f CAD %3d KPH %4.1f PWR' %5.1f : ", sinceTrigger, vPIN, vPWM, DUTY, cadence, speed, powerFromSpeed(speed));
-#endif
+    Serial.printf("%6d : ", sinceTrigger);
 
-#if defined(CSC_MODE)
-    Serial.printf("WR %4d WT %7d CR %4d CT %7d", wheelCount, lastWheel, crankCount, lastCrank);
-#else
-    Serial.printf("PWR %4d WR %4d WT %7d CR %4d CT %7d", power, wheelCount, lastWheel, crankCount, lastCrank);
-#endif
+    #if defined(DEBUG)
+      Serial.printf("%4.2f Vi %4.2f Vm %5.1f %% : ", vPIN, vPWM, DUTY);
+    #endif
+    
+    Serial.printf("%3d RPM %4.1f KPH %5.1f W' : ", cadence, speed, powerFromSpeed(speed));
+
+    #if defined(CSC_MODE)
+      Serial.printf("%4d #W %7d ms %4d #C %7d ms", wheelCount, lastWheel, crankCount, lastCrank);
+    #else
+      Serial.printf("%4d W %4d #W %7d ms %4d #C %7d ms", power, wheelCount, lastWheel, crankCount, lastCrank);
+    #endif
 
 
     // notify
-#if defined(CSC_MODE)
-    serviceNotifyCSC(wheelCount, lastWheel, crankCount, lastCrank);
-#else
-    serviceNotifyCP(power, wheelCount, lastWheel, crankCount, lastCrank);
-#endif
+    #if defined(CSC_MODE)
+      serviceNotifyCSC(wheelCount, lastWheel, crankCount, lastCrank);
+    #else
+      serviceNotifyCP(power, wheelCount, lastWheel, crankCount, lastCrank);
+    #endif
 
     Serial.println("");
 
@@ -457,17 +493,20 @@ void loop() {
 
 
     // sleep 
-    if (sinceTrigger >= sleepTrigger ) {
-      Serial.println("Sleep - trigger crank sensor to wake!\n");
+    #if defined(DOSLEEP)
+      if (sinceTrigger >= sleepTrigger ) {
+        Serial.println(" Sleep : trigger crank sensor to wake\n");
 
-      // shutdown bluetooth
-      esp_bt_controller_disable();
+        // shutdown bluetooth
+        esp_bt_controller_disable();
 
-      // external wake via crank reed low > PNP high
-      esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
+        // external wake via crank reed low > PNP high
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
 
-      // sleep
-      esp_deep_sleep_start();
-    }
+        // sleep
+        esp_deep_sleep_start();
+      }
+    #endif
+
   }
 }

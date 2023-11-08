@@ -48,6 +48,7 @@ Unfinished, under developement.
 1. Finalise code to report correct cadance [notify every 2 seconds]
 1. Report approx power based on speed and terminal velocity
 1. Report duty-cycle as power to collect bulk correlation data [download CSV for workout from iOS Health]
+1. Added crank trigger via build in hall effect sensor
 
 ### Todo
 1. Reverse engineer power function: P = f(C,D)
