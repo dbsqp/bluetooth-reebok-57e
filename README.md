@@ -13,8 +13,11 @@ The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://w
 
 This branche focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
 
+## General Use
+Although developed for my use case this code can be esily implemented for any exercise bike and bluetooth client. The simplist implementation would be an external reed or hall sensor connected directly to the esp32 using approximate power mode.
+
 ## Status
-Unfinished, under developement.
+Working, under developement.
 
 ## Roadmap
 ### Done
