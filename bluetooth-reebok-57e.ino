@@ -105,9 +105,21 @@ void setup() {
     setupSleep();
   #endif
 
+  Serial.print("  Mode : ");
+  #if defined(USEPOWER)
+    Serial.print("Power [CP]");
+    #if defined(USEAPPROX)
+      Serial.print(" - Approx");
+    #endif
+  #else
+    Serial.print("Cadence [CSC]");
+  #endif
+
   #if defined(USEHALL)
+    Serial.println(" - Hall");
     setupHallSensor();
   #else
+    Serial.println("");
     setupRevSensor();
   #endif
 
@@ -159,26 +171,11 @@ void setupBluetoothServer() {
 
   // create device
   BLEDevice::init(SERVER_NAME);
-  Serial.printf("Server : %s", SERVER_NAME);
+  Serial.printf("Device : %s\n", SERVER_NAME);
 
   // create server
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-
-  #if defined(USEPOWER)
-    Serial.print(" - Power [CP]");
-    #if defined(USEAPPROX)
-      Serial.print(" - Approx");
-    #endif
-  #else
-    Serial.print(" - Cadence [CSC]");
-  #endif
-
-  #if defined(USEHALL)
-    Serial.println(" - Hall");
-  #else
-    Serial.println("");
-  #endif
 
   // create service & add measurement/features
   BLEService *pService = pServer->createService(SERVICE_UUID);
@@ -214,17 +211,17 @@ void setupBluetoothServer() {
 
 // setup headers
 void setupHeaders() {
-  Serial.print("SAMPLE : CAD  KPH   KM : ");
+  Serial.print("Sample : RPM  KPH   KM ");
 
   #if defined(DEBUG)
-    Serial.print(" Vin Vpwm DUTY% : ");
+    Serial.print("V-IN V-PM  DUTY PWR-M PWR-A");
   #endif
 
   #if defined(USEPOWER)
-    Serial.print("WATT ");
+    Serial.print(" PWR ");
   #endif
   
-  Serial.println(" W-#  W-TIME  C-#  C-TIME");
+  Serial.println(" W-#   W-T  C-#   C-T");
 }
 
 
@@ -465,26 +462,29 @@ void loop() {
     double vPWM = 5.0 - (5.0 * aMag/4095);
     double DUTY = 100.0 * vPWM/4.348;
 
+    double powerM = DUTY; // TODO : update to real function
+    double powerS = powerFromSpeed(speed);
+
     #if defined(USEAPPROX)
-      power = (int) powerFromSpeed(speed);
+      power = (int)( powerS + 0.5 );
     #else
-      power = (int)(DUTY);
+      power = (int)( powerM + 0.5 );
     #endif
 
 
     // serial output
     Serial.printf("%6d : ", sinceTrigger);
-    Serial.printf("%3d %4.1f %4.1f : ", cadence, speed, distance);
+    Serial.printf("%3d %4.1f %4.1f ", cadence, speed, distance);
 
     #if defined(DEBUG)
-        Serial.printf("%4.2f %4.2f %5.1f : ", vPIN, vPWM, DUTY);
+        Serial.printf("%4.2f %4.2f %5.1f %5.1f %5.1f", vPIN, vPWM, DUTY, powerM, powerS);
     #endif
 
     #if defined(USEPOWER)
       Serial.printf("%4d ", power);
     #endif
 
-    Serial.printf("%4d %7d %4d %7d ", wheelCount, lastWheel, crankCount, lastCrank);
+    Serial.printf("%4d %5d %4d %5d ", wheelCount, lastWheel, crankCount, lastCrank);
 
 
     // notify
