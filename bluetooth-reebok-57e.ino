@@ -9,9 +9,9 @@
 */
 
 // NOTE : onboard LED indicates UART activity
+// NOTE : https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 
 // TODO : implement final power = f(cadance, resistance)
-// TODO : only report power if pedelling
 
 #include <BLEDevice.h>
 #include <BLEUtils.h>
@@ -22,20 +22,20 @@
 
 
 // options
-#define DEBUG     // add debug data to serial notify output
 #define USEPOWER  // create Power, Cadence & Speed insted of basic Cadence & Speed 
 #define USEAPPROX // use approx power calculated from speed instead of measurement
 #define USESLEEP  // sleep and wake via PIN_REED [USEHALL overrides]
-//#define USEHALL  // use builtin hall effect sensor of ESP32 to as crank trigger at > HALLTRIG
+//#define USEHALL  // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG
+//#define DEBUG    // add debug data to serial notify output
 
-const char SERVER_NAME[] = "Reebok 5.7e Bike"; // Bluetooth device name
+const char  BTNAME[] = "Reebok 5.7e Bike"; // Bluetooth device name
 const int   PIN_REED = 13;  // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
 const int   PIN_EMAG = 14;  // electromagnet (5V 1kHz PWM, analogue sense via NPN)
 const float SLEEPMIN = 3.5; // minuites on inactivity until sleep - match bike sleep of 3.5 mins
 const int   HALLTRIG = 100; // trigger threshold for hall sensor
 
 #if defined(USEHALL)
-  #undef(USESLEEP)  // no sleep with hall sensor as can not easily wake
+  #undef(USESLEEP)  // no sleep with ESP32 internal hall sensor as can not easily wake
 #endif
 
 
@@ -46,7 +46,6 @@ int sleepTrigger = (int)( SLEEPMIN * 60 * 1000 );
 
 BLEServer *pServer;
 
-// https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 #if defined(USEPOWER)
   #define SERVICE_UUID BLEUUID((uint16_t)0x1818)
   BLECharacteristic featureCharacteristics(BLEUUID((uint16_t)0x2A65), BLECharacteristic::PROPERTY_READ);
@@ -62,7 +61,6 @@ BLEServer *pServer;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
-
 bool oldState;              // crank sensor state
 
 unsigned long lastNotify;   // time last notify
@@ -77,10 +75,14 @@ uint16_t lastCrank;         // time last crank revolution
 uint32_t wheelCount;        // count wheel revolutions
 uint16_t lastWheel;         // time last wheel revolution 
 uint16_t power;             // power in Watts
-uint16_t cadence;           // crank revolutions per minuite
 
-double distance;            // km
+uint16_t lastCrankCount;    // crankCount of previous notify
+uint16_t cadence;           // crank rpm
+
+double distance;            // total in km
 double speed;               // speed in km/h
+double powerM;              // power measured
+double powerS;              // power from speed
 
 
 // connection status
@@ -128,19 +130,20 @@ void setup() {
 
   setupHeaders();
 
-    lastNotify = 0;
-   lastTrigger = 0;
+      lastNotify = 0;
+     lastTrigger = 0;
 
-  triggerCount = 0;
-           mag = 0;
+    triggerCount = 0;
+             mag = 0;
 
-    crankCount = 0;
-     lastCrank = 0;
-    wheelCount = 0;
-     lastWheel = 0;
-         power = 0;
+      crankCount = 0;
+       lastCrank = 0;
+      wheelCount = 0;
+       lastWheel = 0;
+           power = 0;
 
-      distance = 0;
+        distance = 0;
+  lastCrankCount = 0;
 }
 
 // setup sleep
@@ -170,8 +173,8 @@ void setupHallSensor() {
 void setupBluetoothServer() {
 
   // create device
-  BLEDevice::init(SERVER_NAME);
-  Serial.printf("Device : %s\n", SERVER_NAME);
+  BLEDevice::init(BTNAME);
+  Serial.printf("Device : %s\n", BTNAME);
 
   // create server
   BLEServer *pServer = BLEDevice::createServer();
@@ -211,7 +214,7 @@ void setupBluetoothServer() {
 
 // setup headers
 void setupHeaders() {
-  Serial.print("Sample : RPM  KPH   KM ");
+  Serial.print("Sample : RPM  KPH     KM ");
 
   #if defined(DEBUG)
     Serial.print("V-IN V-PM  DUTY PWR-M PWR-A");
@@ -232,7 +235,7 @@ inline bool risingEdge(bool &oldState, bool state) {
 
   #if defined(DEBUG)
     if (result) {
-      Serial.println("DEBUG trigger _/");
+      Serial.println(" Debug : trigger - rising");
     }
   #endif
 
@@ -246,7 +249,7 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
   #if defined(DEBUG)
     if (!result) {
-      Serial.println("DEBUG trigger \\_");
+      Serial.println(" Debug : trigger - falling");
     }
   #endif
 
@@ -311,15 +314,15 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   if (deviceConnected) {
     measurementCharacteristics.setValue(measurement, 11);
     measurementCharacteristics.notify();
-    Serial.print(" >> client");
+    Serial.print(">> client");
   }
 
   // restart advertising if disconnected
   if (disconnecting) {
     delay(500);
     pServer->startAdvertising();
-    Serial.println("\nClient: disconnected");
-    Serial.print("Server: Advertising...");
+    Serial.println("\nClient : disconnected");
+    Serial.print("Server : Advertising...");
 
     oldDeviceConnected = deviceConnected;
   }
@@ -327,9 +330,9 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   // feature notify if connecting
   if (connecting) {
     oldDeviceConnected = deviceConnected;
-    Serial.println("\nClient: connected");
+    Serial.println("\nClient : connected");
     featureCharacteristics.setValue(feature, 1);
-    Serial.print("Server: set features");
+    Serial.print("Server : set features");
   }
 }
 
@@ -366,15 +369,15 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
   if (deviceConnected) {
     measurementCharacteristics.setValue(measurement, 16);
     measurementCharacteristics.notify();
-    Serial.print(" >> client");
+    Serial.print(">> client");
   }
 
   // restart advertising if disconnected
   if (disconnecting) {
     delay(500);
     pServer->startAdvertising();
-    Serial.println("\nClient: disconnected");
-    Serial.print("Server: Advertising...");
+    Serial.println("\nClient : disconnected");
+    Serial.print("Server : Advertising...");
     oldDeviceConnected = deviceConnected;
   }
 
@@ -383,7 +386,7 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
     Serial.println("\nClient: connected");
     oldDeviceConnected = deviceConnected;
     featureCharacteristics.setValue(feature, 1);
-    Serial.print("Server: set features");
+    Serial.print("Server : set features");
   }
 }
 
@@ -419,26 +422,26 @@ void loop() {
 
   // average electromagnet PWM voltage
   mag = (int)analogRead(PIN_EMAG);
-
-  // add logic to report zero power when not pedelling
-  // if pedeling (rev in last two seconds C = 30) and not max (PWM glitch)
-  // if (sinceTrigger < 2000 && mag != 4095) {
-     sMag += mag;
-     nMag ++;
-  // }
+  sMag += mag;
+  nMag ++;
 
 
   // notify bluetooth client every 2 seconds
   if (sinceNotify >= 2000) {
 
     // cadence
-    if ( lastCrank != 0 && triggerCount > crankCount ) {
-      cadence = (int)( ( triggerCount - crankCount ) / ( ( lastTrigger - lastCrank ) / ( 1000*60.0 ) ) );
+    uint16_t diffCrankCount = triggerCount - lastCrankCount;
+    uint16_t diffCrank = lastTrigger - lastCrank;
+
+    crankCount = triggerCount;
+     lastCrank = lastTrigger;
+
+    if ( diffCrank > 0 ) {
+      cadence = (int)( diffCrankCount / ( diffCrank / ( 1000*60.0 ) ) );
+      lastCrankCount = crankCount;
     } else {
       cadence = 0;
     }
-    crankCount = triggerCount;
-      lastCrank = lastTrigger;
 
     // wheel rev
     // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
@@ -451,20 +454,25 @@ void loop() {
       lastWheel = lastCrank * 1;  // 1/1024 s granularity
     #endif
 
-    // speed & distance
+    // speed, distance & power (approx)
     // NOTE : 2.13 m is circumference of 700c
-    speed = cadence * 3 * 2.13 * 60 / 1000;
+       speed = cadence * 3 * 2.13 * 60 / 1000;
     distance = wheelCount * 2.13 / 1000;
+      powerS = powerFromSpeed(speed);
 
-    // power
+    // power (measured)
     double aMag = sMag/nMag;
     double vPIN = 3.3 * aMag/4095;
     double vPWM = 5.0 - (5.0 * aMag/4095);
     double DUTY = 100.0 * vPWM/4.348;
 
-    double powerM = DUTY; // TODO : update to real function
-    double powerS = powerFromSpeed(speed);
+    if ( diffCrank > 0 ) {
+      powerM = DUTY;      // TODO : update to real function
+    } else {
+      powerM = 0;
+    }
 
+    // power reported
     #if defined(USEAPPROX)
       power = (int)( powerS + 0.5 );
     #else
@@ -474,7 +482,7 @@ void loop() {
 
     // serial output
     Serial.printf("%6d : ", sinceTrigger);
-    Serial.printf("%3d %4.1f %4.1f ", cadence, speed, distance);
+    Serial.printf("%3d %4.1f %6.3f ", cadence, speed, distance);
 
     #if defined(DEBUG)
         Serial.printf("%4.2f %4.2f %5.1f %5.1f %5.1f", vPIN, vPWM, DUTY, powerM, powerS);
@@ -503,18 +511,12 @@ void loop() {
     lastNotify = millis();
 
 
-    // sleep 
+    // sleep - wake via crank reed low = PNP high
     #if defined(USESLEEP)
       if (sinceTrigger >= sleepTrigger ) {
         Serial.println(" Sleep : trigger crank sensor to wake\n");
-
-        // shutdown bluetooth
         esp_bt_controller_disable();
-
-        // external wake via crank reed low > PNP high
         esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
-
-        // sleep
         esp_deep_sleep_start();
       }
     #endif

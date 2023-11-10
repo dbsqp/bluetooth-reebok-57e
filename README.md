@@ -55,4 +55,4 @@ Working, under developement.
 
 ### Todo
 1. Reverse engineer power function: P = f(C,D)
-1. Decide to use f(C,D) or approximation for power.
+1. Decide to use f(C,D) or approximation for power
