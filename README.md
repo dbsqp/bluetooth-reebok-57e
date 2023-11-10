@@ -10,12 +10,8 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 
 ## Apple Watch and iOS Workout Details
 
-<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-bluetooth.jpeg?raw=true" width="200" />
-<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-metrics.jpeg?raw=true" width="200" />
-<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-power.jpeg?raw=true" width="200" />
-
-<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-details.jpeg?raw=true" width="200" />
-<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-power.jpeg?raw=true" width="200" />
+<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-bluetooth.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-metrics.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-power.jpeg?raw=true" width="200" />
+<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-details.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-power.jpeg?raw=true" width="200" />
 
 ## Bluetooth Service
 The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
