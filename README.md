@@ -8,6 +8,11 @@ This is an ESP32 based bluetooth metrics server for a Reebok 5.7e indoor exercis
 
 The project targets the Apple Watch running watchOS 10 or later as a monitoring device.
 
+## Apple Watch and iOS Workout Details
+
+![Bluetooth](https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-bluetooth.jpg?raw=true)
+
+
 ## Bluetooth Service
 The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
 
