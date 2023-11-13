@@ -20,7 +20,8 @@ The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://w
 This branche focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
 
 ## General Use
-Although developed for my use case this code can be esily implemented for any exercise bike and bluetooth client. The simplist implementation would be an external reed or hall sensor connected directly to the esp32 using approximate power mode.
+Although developed for my use case this code can be esily implemented for any exercise bike and bluetooth client. The simplist implementation would be an external reed sensor connecting GND directly to ESP32 GPIO (or an external hall sensor) using CSC mode (no USEPOWER) or approx power (USEAPPROX) mode with appropriate logic (USEDIRECT).
+I also implemented crank triggering using the internal hall sensor of the ESP32 but did not test in-situ so trigger threshold (HALLTRIG) and logic would need to be adjusted.
 
 ## Status
 Working, under developement.
@@ -58,6 +59,7 @@ Working, under developement.
 1. Report approx power based on speed and terminal velocity
 1. Report duty-cycle as power to collect bulk correlation data [download CSV for workout from iOS Health]
 1. Added crank trigger via build in hall effect sensor
+1. Added provision for simple reed trigger [GND - REED - GPIO]
 
 ### Todo
 1. Reverse engineer power function: P = f(C,D)

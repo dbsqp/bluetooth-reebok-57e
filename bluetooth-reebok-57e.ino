@@ -24,15 +24,22 @@
 // options
 #define USEPOWER  // create Power, Cadence & Speed insted of basic Cadence & Speed 
 #define USEAPPROX // use approx power calculated from speed instead of measurement
+#define USESCALED // use scaled approx power
 #define USESLEEP  // sleep and wake via PIN_REED [USEHALL overrides]
-//#define USEHALL  // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG
-//#define DEBUG    // add debug data to serial notify output
+//#define USEDIRECT // invert reed sensor logic for direct connection to GPIO ie. GND-REED-GPIO not indirect via PNP
+//#define USEHALL   // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG
+#define DEBUG     // add debug data to serial output
+//#define DEBUG2    // add trigger events to serial output
+
 
 const char  BTNAME[] = "Reebok 5.7e Bike"; // Bluetooth device name
-const int   PIN_REED = 13;  // reed-switch (trigger pulls low, digital sense via PNP) + sleep wake
-const int   PIN_EMAG = 14;  // electromagnet (5V 1kHz PWM, analogue sense via NPN)
-const float SLEEPMIN = 3.5; // minuites on inactivity until sleep - match bike sleep of 3.5 mins
-const int   HALLTRIG = 100; // trigger threshold for hall sensor
+const int   PIN_REED = 13;   // reed-switch. Crank event pulls GPIO high (indiret/PNP) or low (direct) + sleep wake
+const int   PIN_EMAG = 14;   // electromagnet (5V 1kHz PWM, analogue sense via NPN)
+const float SLEEPMIN = 3.5;  // minuites on inactivity until sleep - match bike sleep of 3.5 mins
+const int   HALLTRIG = 100;  // trigger threshold for hall sensor
+const float APPROXF1 = 0.33; // approx power correction factor 1 - scale (80 @ 100 W, 110 @ 190 W)
+const float APPROXF2 = 36;   // approx power correction factor 2 - offset
+
 
 #if defined(USEHALL)
   #undef(USESLEEP)  // no sleep with ESP32 internal hall sensor as can not easily wake
@@ -71,11 +78,12 @@ unsigned long sMag;         //   sum of analogue input reads between notificatio
 unsigned long nMag;         // count of analogue input reads between notifications
 
 uint16_t crankCount;        // count rank revolutions
-uint16_t lastCrank;         // time last crank revolution
+uint16_t lastCrankK;        // time last crank revolution 1/1024 s
 uint32_t wheelCount;        // count wheel revolutions
-uint16_t lastWheel;         // time last wheel revolution 
+uint16_t lastWheelK;        // time last wheel revolution 1/1024 s
 uint16_t power;             // power in Watts
 
+uint16_t lastCrank;         // time last crank revolution 1/1000 s = ms
 uint16_t lastCrankCount;    // crankCount of previous notify
 uint16_t cadence;           // crank rpm
 
@@ -83,7 +91,7 @@ double distance;            // total in km
 double speed;               // speed in km/h
 double powerM;              // power measured
 double powerS;              // power from speed
-
+double diffCrankTime;       // crank rotation time in ms
 
 // connection status
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -112,6 +120,9 @@ void setup() {
     Serial.print("Power [CP]");
     #if defined(USEAPPROX)
       Serial.print(" - Approx");
+      #if defined(USESCALED)
+        Serial.print("/Scaled");
+      #endif
     #endif
   #else
     Serial.print("Cadence [CSC]");
@@ -120,8 +131,7 @@ void setup() {
   #if defined(USEHALL)
     Serial.println(" - Hall");
     setupHallSensor();
-  #else
-    Serial.println("");
+  #else    
     setupRevSensor();
   #endif
 
@@ -132,17 +142,21 @@ void setup() {
 
       lastNotify = 0;
      lastTrigger = 0;
+       lastCrank = 0;
 
     triggerCount = 0;
              mag = 0;
 
       crankCount = 0;
-       lastCrank = 0;
+      lastCrankK = 0;
       wheelCount = 0;
-       lastWheel = 0;
+      lastWheelK = 0;
            power = 0;
 
         distance = 0;
+           speed = 0;
+          powerM = 0;
+          powerS = 0;
   lastCrankCount = 0;
 }
 
@@ -150,12 +164,19 @@ void setup() {
 void setupSleep() {
   ++bootCount;
   Serial.printf(" : %d\n", bootCount);
-  Serial.printf(" Sleep : %.1f mins [ %'d ms ]\n", SLEEPMIN, sleepTrigger );
+  Serial.printf(" Sleep : %.1f mins [ %d s ]\n", SLEEPMIN, sleepTrigger/1000 );
 }
 
 // setup cadance sensor reed > GND
 void setupRevSensor() {
-  pinMode(PIN_REED, INPUT);
+  #if defined(USEDIRECT)
+    Serial.println(" - Direct");
+    pinMode(PIN_REED, INPUT_PULLUP);
+  #else
+    Serial.println(" - Indirect");
+    pinMode(PIN_REED, INPUT_PULLDOWN);
+  #endif
+
   oldState = digitalRead(PIN_REED);
 }
 
@@ -214,10 +235,17 @@ void setupBluetoothServer() {
 
 // setup headers
 void setupHeaders() {
-  Serial.print("Sample : RPM  KPH     KM ");
+
+  #if defined(USESLEEP)
+    Serial.print(" SLEEP : ");
+  #else
+    Serial.print("SAMPLE : ");
+  #endif
+
+  Serial.print("RPM  KPH     KM ");
 
   #if defined(DEBUG)
-    Serial.print("V-IN V-PM  DUTY PWR-M PWR-A");
+    Serial.print("- d#   dT dT/# - V-IN V-PM  DUTY - PWR-M PWR-A - ");
   #endif
 
   #if defined(USEPOWER)
@@ -233,7 +261,7 @@ void setupHeaders() {
 inline bool risingEdge(bool &oldState, bool state) {
   bool result = (!oldState && state);  // !0 && 1
 
-  #if defined(DEBUG)
+  #if defined(DEBUG2)
     if (result) {
       Serial.println(" Debug : trigger - rising");
     }
@@ -247,7 +275,7 @@ inline bool risingEdge(bool &oldState, bool state) {
 inline bool fallingEdge(bool &oldState, bool state) {
   bool result = (oldState && !state);  // 1 && !0
 
-  #if defined(DEBUG)
+  #if defined(DEBUG2)
     if (!result) {
       Serial.println(" Debug : trigger - falling");
     }
@@ -279,6 +307,7 @@ double powerFromSpeed(double kph) {
 
   double tv = velocity + headwind;       // terminal velocity
   double A2Eff = (tv > 0.0) ? A2 : -A2;  // reverse effect wind in face
+
   return (velocity * tres + velocity * tv * tv * A2Eff) / transv;
 }
 
@@ -400,6 +429,7 @@ void loop() {
   // count crank revolutions
   unsigned long sinceTrigger = millis() - lastTrigger;  // ms since last trigger
   bool state;
+  bool edge;
 
   #if defined(USEHALL)
     // ESP32 build-in hall sensor
@@ -414,7 +444,13 @@ void loop() {
   #endif
 
   if (sinceTrigger > 400 && state != oldState) {
-    if (fallingEdge(oldState, state)) {
+    #if defined(USEDIRECT)
+      edge =  risingEdge(oldState, state);
+    #else
+      edge = fallingEdge(oldState, state);
+    #endif
+
+    if ( edge ) {
       lastTrigger = millis();
       triggerCount++;
     }
@@ -429,18 +465,43 @@ void loop() {
   // notify bluetooth client every 2 seconds
   if (sinceNotify >= 2000) {
 
+    // sleep - wake via crank reed sensor
+    #if defined(USESLEEP)
+      if (sinceTrigger >= sleepTrigger ) {
+        Serial.println(" Sleep : trigger crank to wake\n");
+        esp_bt_controller_disable();
+
+        #if defined(USEDIRECT)
+          esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,0);
+        #else
+          esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
+        #endif
+
+        esp_deep_sleep_start();
+      } else {
+        Serial.printf("%6d : ", (sleepTrigger - sinceTrigger)/1000);
+      }
+    #else
+        Serial.printf("%6d : ", sinceTrigger/1000);
+    #endif
+
+
     // cadence
     uint16_t diffCrankCount = triggerCount - lastCrankCount;
     uint16_t diffCrank = lastTrigger - lastCrank;
+    
 
     crankCount = triggerCount;
      lastCrank = lastTrigger;
+    lastCrankK = (int)( 1.0 * 1024 * lastCrank / 1000 );  // 1/1024 s granularity
 
     if ( diffCrank > 0 ) {
       cadence = (int)( diffCrankCount / ( diffCrank / ( 1000*60.0 ) ) );
       lastCrankCount = crankCount;
+      diffCrankTime = (int)( diffCrank / diffCrankCount );
     } else {
       cadence = 0;
+      diffCrankTime = 0;
     }
 
     // wheel rev
@@ -449,16 +510,21 @@ void loop() {
     wheelCount = crankCount * 3;
 
     #if defined(USEPOWER)
-      lastWheel = lastCrank * 2;  // 1/2048 s granularity
+      lastWheelK = lastCrankK * 2;  // 1/2048 s granularity
     #else
-      lastWheel = lastCrank * 1;  // 1/1024 s granularity
+      lastWheelK = lastCrankK * 1;  // 1/1024 s granularity
     #endif
 
     // speed, distance & power (approx)
     // NOTE : 2.13 m is circumference of 700c
        speed = cadence * 3 * 2.13 * 60 / 1000;
     distance = wheelCount * 2.13 / 1000;
+
+    #if defined(USESCALED)
+      powerS = APPROXF1 * powerFromSpeed(speed) + APPROXF2;
+    #else
       powerS = powerFromSpeed(speed);
+    #endif
 
     // power (measured)
     double aMag = sMag/nMag;
@@ -481,25 +547,24 @@ void loop() {
 
 
     // serial output
-    Serial.printf("%6d : ", sinceTrigger);
     Serial.printf("%3d %4.1f %6.3f ", cadence, speed, distance);
 
     #if defined(DEBUG)
-        Serial.printf("%4.2f %4.2f %5.1f %5.1f %5.1f", vPIN, vPWM, DUTY, powerM, powerS);
+        Serial.printf("- %2d %4d %4.0f - %4.2f %4.2f %5.1f - %5.1f %5.1f - ", diffCrankCount, diffCrank, diffCrankTime, vPIN, vPWM, DUTY, powerM, powerS);
     #endif
 
     #if defined(USEPOWER)
       Serial.printf("%4d ", power);
     #endif
 
-    Serial.printf("%4d %5d %4d %5d ", wheelCount, lastWheel, crankCount, lastCrank);
+    Serial.printf("%4d %5d %4d %5d ", wheelCount, lastWheelK, crankCount, lastCrankK);
 
 
     // notify
     #if defined(USEPOWER)
-      serviceNotifyCP(power, wheelCount, lastWheel, crankCount, lastCrank);
+      serviceNotifyCP(power, wheelCount, lastWheelK, crankCount, lastCrankK);
     #else
-      serviceNotifyCSC(wheelCount, lastWheel, crankCount, lastCrank);
+      serviceNotifyCSC(wheelCount, lastWheelK, crankCount, lastCrankK);
     #endif
 
     Serial.println("");
@@ -509,17 +574,5 @@ void loop() {
     sMag = 0;
     nMag = 0;
     lastNotify = millis();
-
-
-    // sleep - wake via crank reed low = PNP high
-    #if defined(USESLEEP)
-      if (sinceTrigger >= sleepTrigger ) {
-        Serial.println(" Sleep : trigger crank sensor to wake\n");
-        esp_bt_controller_disable();
-        esp_sleep_enable_ext0_wakeup(GPIO_NUM_13,1);
-        esp_deep_sleep_start();
-      }
-    #endif
-
   }
 }
