@@ -10,9 +10,9 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 
 ## Apple Watch and iOS Workout Details
 
-| <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-bluetooth.jpeg?raw=true" width="200" /> | <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-metrics.jpeg?raw=true" width="200" /> | <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-power.jpeg?raw=true" width="200" /> |
+<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-bluetooth.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-metrics.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-watchos-cycling-power.jpeg?raw=true" width="200" />
 
-| <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-details.jpeg?raw=true" width="200" /> | <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-power.jpeg?raw=true" width="200" /> |
+<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-details.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-power.jpeg?raw=true" width="200" /> 
 
 ## Bluetooth Service
 The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
@@ -54,13 +54,13 @@ Working, under developement.
 1. Calculate primary resistance metric as PWM duty-cycle (D) [100% = high resistance, 0% = no resistance]
 1. finalise interface board [implement PWM circuit, insulation, robust physical mount]
 1. Implement sleep timer [deep sleep after inactivity, wake on crank sensor]
-1. Measure magnet duty-cycle at given cadance [80,100,120] and power [100,160, 240]
+1. Measure magnet duty-cycle at given cadance [80,100,120] and power [60, 100, 150, 190, 240, 280]
 1. Finalise code to report correct cadance [notify every 2 seconds]
-1. Report approx power based on speed and terminal velocity
-1. Report duty-cycle as power to collect bulk correlation data [download CSV for workout from iOS Health]
+1. Report approx power based on speed and terminal velocity [not very accutate]
+1. Report duty-cycle as power to collect data for correlation [manual]
 1. Added crank trigger via build in hall effect sensor
 1. Added provision for simple reed trigger [GND - REED - GPIO]
+1. Reverse engineer power function: P = f(D,C) [implemented]
 
 ### Todo
-1. Reverse engineer power function: P = f(C,D)
-1. Decide to use f(C,D) or approximation for power
+1. Decide to use f(C,D) or approximation for power [use as approx way off]

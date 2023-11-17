@@ -23,22 +23,33 @@
 
 // options
 #define USEPOWER  // create Power, Cadence & Speed insted of basic Cadence & Speed 
-#define USEAPPROX // use approx power calculated from speed instead of measurement
-#define USESCALED // use scaled approx power
+//#define USEAPPROX // use approx power calculated from speed instead of measurement
+//#define USEAPCORR // use approx power correction factors APCORRF0 and APCORRF1
 #define USESLEEP  // sleep and wake via PIN_REED [USEHALL overrides]
-//#define USEDIRECT // invert reed sensor logic for direct connection to GPIO ie. GND-REED-GPIO not indirect via PNP
+//#define USEDIRECT // invert reed sensor logic for direct connection to GPIO ie. GND-REED-GPIO
 //#define USEHALL   // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG
 #define DEBUG     // add debug data to serial output
 //#define DEBUG2    // add trigger events to serial output
 
-
+// constants
 const char  BTNAME[] = "Reebok 5.7e Bike"; // Bluetooth device name
 const int   PIN_REED = 13;   // reed-switch. Crank event pulls GPIO high (indiret/PNP) or low (direct) + sleep wake
 const int   PIN_EMAG = 14;   // electromagnet (5V 1kHz PWM, analogue sense via NPN)
 const float SLEEPMIN = 3.5;  // minuites on inactivity until sleep - match bike sleep of 3.5 mins
 const int   HALLTRIG = 100;  // trigger threshold for hall sensor
-const float APPROXF1 = 0.33; // approx power correction factor 1 - scale (80 @ 100 W, 110 @ 190 W)
-const float APPROXF2 = 36;   // approx power correction factor 2 - offset
+
+// approx power correction factors
+const float c0 = +57.03147; // offset
+const float c1 = +0.222511; // linear
+
+ // emperical power function coefficients 
+const float cDD = +0.003426; // non-linear D^2
+const float cCC = -0.003840; // non-linear C^2
+const float cCD = +0.024750; // non-linear C*D
+const float cD  = +3.941907; // linear D
+const float cC  = +1.341997; // linear C
+const float cO  = -105.5747; // offset
+
 
 
 #if defined(USEHALL)
@@ -120,8 +131,8 @@ void setup() {
     Serial.print("Power [CP]");
     #if defined(USEAPPROX)
       Serial.print(" - Approx");
-      #if defined(USESCALED)
-        Serial.print("/Scaled");
+      #if defined(USEAPCORR)
+        Serial.print(" [Corrected]");
       #endif
     #endif
   #else
@@ -173,7 +184,7 @@ void setupRevSensor() {
     Serial.println(" - Direct");
     pinMode(PIN_REED, INPUT_PULLUP);
   #else
-    Serial.println(" - Indirect");
+    Serial.println("");
     pinMode(PIN_REED, INPUT_PULLDOWN);
   #endif
 
@@ -182,7 +193,7 @@ void setupRevSensor() {
 
 // setup resistance sensor PWM > analogue
 void setupMagSensor() {
-  pinMode(PIN_EMAG, INPUT);
+  pinMode(PIN_EMAG, INPUT_PULLUP);
 }
 
 // setup hall sensor
@@ -245,14 +256,14 @@ void setupHeaders() {
   Serial.print("RPM  KPH     KM ");
 
   #if defined(DEBUG)
-    Serial.print("- d#   dT dT/# - V-IN V-PM  DUTY - PWR-M PWR-A - ");
+    Serial.print("- d#   dT dT/# - V-IN V-PM  D-PM - PWR-M PWR-A - ");
   #endif
 
   #if defined(USEPOWER)
     Serial.print(" PWR ");
   #endif
   
-  Serial.println(" W-#   W-T  C-#   C-T");
+  Serial.println(" N-W   T-W  N-C   T-C");
 }
 
 
@@ -289,9 +300,8 @@ inline bool fallingEdge(bool &oldState, bool state) {
 
 // calculations
 double powerFromSpeed(double kph) {
-  double velocity = kph * 0.2777;  // m/s
-  double riderWeight = 72.0;       // kg
-  double bikeWeight = 12.0;        // kg
+  double riderWeight = 72.0;   // kg
+  double bikeWeight = 12.0;    // kg
   double rollingRes = 0.004;
   double frontalArea = 0.445;  // Bartops
   double grade = 0;            // °
@@ -300,15 +310,26 @@ double powerFromSpeed(double kph) {
   double elevation = 100;      // m
   double transv = 0.95;        // unknown
 
+  double velocity = kph * 0.2777;  // m/s
   double density = (1.293 - 0.00426 * temperature) * exp(-elevation / 7000.0);
   double twt = 9.8 * (riderWeight + bikeWeight);  // total weight in newtons
   double A2 = 0.5 * frontalArea * density;        // full air resistance parameter
   double tres = twt * (grade + rollingRes);       // gravity and rolling resistance
-
-  double tv = velocity + headwind;       // terminal velocity
-  double A2Eff = (tv > 0.0) ? A2 : -A2;  // reverse effect wind in face
+  double tv = velocity + headwind;                // terminal velocity
+  double A2Eff = (tv > 0.0) ? A2 : -A2;           // reverse effect wind in face
 
   return (velocity * tres + velocity * tv * tv * A2Eff) / transv;
+}
+
+double powerFromDutyAndCadance(double D, double C ) {
+  double Pdd = cDD* D * D;
+  double Pcc = cCC * C * C;
+  double Pcd = cCD * C * D;
+  double Pc  = cC * C;
+  double Pd  = cD * D;
+  double Po  = cO;
+
+  return Pdd + Pcc + Pcd + Pc + Pd + Po;
 }
 
 
@@ -498,7 +519,12 @@ void loop() {
     if ( diffCrank > 0 ) {
       cadence = (int)( diffCrankCount / ( diffCrank / ( 1000*60.0 ) ) );
       lastCrankCount = crankCount;
-      diffCrankTime = (int)( diffCrank / diffCrankCount );
+      if ( diffCrank > 9999 ){
+        diffCrank = 9999;
+        diffCrankTime = 9999;
+      } else {
+        diffCrankTime = (int)( diffCrank / diffCrankCount );
+      }
     } else {
       cadence = 0;
       diffCrankTime = 0;
@@ -520,8 +546,8 @@ void loop() {
        speed = cadence * 3 * 2.13 * 60 / 1000;
     distance = wheelCount * 2.13 / 1000;
 
-    #if defined(USESCALED)
-      powerS = APPROXF1 * powerFromSpeed(speed) + APPROXF2;
+    #if defined(USEAPCORR)
+      powerS = powerFromSpeed(speed) * c1 + c0;
     #else
       powerS = powerFromSpeed(speed);
     #endif
@@ -530,10 +556,10 @@ void loop() {
     double aMag = sMag/nMag;
     double vPIN = 3.3 * aMag/4095;
     double vPWM = 5.0 - (5.0 * aMag/4095);
-    double DUTY = 100.0 * vPWM/4.348;
+    double dPWM = 100.0 * (vPIN/0.564);
 
     if ( diffCrank > 0 ) {
-      powerM = DUTY;      // TODO : update to real function
+      powerM = powerFromDutyAndCadance(dPWM, cadence);
     } else {
       powerM = 0;
     }
@@ -550,7 +576,7 @@ void loop() {
     Serial.printf("%3d %4.1f %6.3f ", cadence, speed, distance);
 
     #if defined(DEBUG)
-        Serial.printf("- %2d %4d %4.0f - %4.2f %4.2f %5.1f - %5.1f %5.1f - ", diffCrankCount, diffCrank, diffCrankTime, vPIN, vPWM, DUTY, powerM, powerS);
+        Serial.printf("- %2d %4d %4.0f - %4.2f %4.2f %5.1f - %5.1f %5.1f - ", diffCrankCount, diffCrank, diffCrankTime, vPIN, vPWM, dPWM, powerM, powerS);
     #endif
 
     #if defined(USEPOWER)
