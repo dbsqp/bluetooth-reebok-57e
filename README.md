@@ -14,21 +14,27 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 
 <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-details.jpeg?raw=true" width="200" /> <img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/apple-ios-workout-power.jpeg?raw=true" width="200" /> 
 
+
 ## Bluetooth Service
 The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
 
 This branche focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
 
+
 ## General Use
 Although developed for my use case this code can be esily implemented for any exercise bike and other bluetooth clients. The simplist implementation would be an external reed sensor connecting GND directly to ESP32 GPIO (or an external hall sensor) using CSC mode (no USEPOWER) or estimated power (USEALTPWR) mode with appropriate trigger logic (USEDIRECT).
+
 Triggering using the internal hall effect sensor of the ESP32 is also implemented, but not test in-situ. Trigger threshold (HALLTRIG) and logic would need to be adjusted for specific magnet orientation and distance from sensor.
+
 
 ## Status
 Initial feature complete release. Fixing bugs
 
 ### Known Bugs
 - *Spuradic Error in Cadence, Speed and Power*
+
     Every so often unexpected very high/low cadence reported, suspect relates to integer rollover leading to excessive dT and derived properties. Difficult to log in-situ will implement InfluxDB push to log externally.
+
 
 ## Roadmap
 ### Done
