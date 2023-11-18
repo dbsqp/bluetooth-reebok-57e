@@ -5,7 +5,7 @@
     Ported to Arduino ESP32 by Evandro Copercini
     updates by chegewara
     based on esp32-ftms-server by jamesjmtaylor
-    updated for Cadance/Speed, Power and Reebok 5.7 by dbsqp
+    updated for Cadence/Speed, Power and Reebok 5.7 by dbsqp
 */
 
 // NOTE : onboard LED indicates UART activity
@@ -21,7 +21,7 @@
 
 // options
 #define USESLEEP  // use deep sleep with PIN_REED as wake [USEHALL overrides]
-#define USEPOWER  // use power calculated emperically from cadence and electromagnet duty cycle P = f(D,C)
+#define USEPOWER  // use power calculated empirically from cadence and electromagnet duty cycle P = f(D,C)
 //#define USEALTPWR // use alternate power calculated from speed P = f(S)
 //#define USEALTCOR // use alternate power correction factors c0 and c1
 //#define USEDIRECT // invert reed sensor logic for direct connection to GPIO ie. GND-REED-GPIO
@@ -31,9 +31,9 @@
 
 // constants
 const char  BTNAME[] = "Reebok 5.7e Bike"; // Bluetooth device name
-const int   PIN_REED = 13;   // reed-switch. Crank event pulls GPIO high (indiret/PNP) or low (direct) + sleep wake
+const int   PIN_REED = 13;   // reed-switch. Crank event pulls GPIO high (indirect/PNP) or low (direct) + sleep wake
 const int   PIN_EMAG = 14;   // electromagnet (5V 1kHz PWM, analogue sense via NPN)
-const float SLEEPMIN = 3.5;  // minuites on inactivity until sleep - match bike sleep of 3.5 mins
+const float SLEEPMIN = 3.5;  // minutes on inactivity until sleep - match bike sleep of 3.5 mins
 const int   HALLTRIG = 100;  // trigger threshold for hall sensor
 
 // estimated power correction factors
@@ -147,7 +147,6 @@ void setup() {
 
   setupMagSensor();
   setupBluetoothServer();
-
   setupHeaders();
 
       lastNotify = 0;
@@ -177,7 +176,7 @@ void setupSleep() {
   Serial.printf(" Sleep : %.1f mins [ %d s ]\n", SLEEPMIN, sleepTrigger/1000 );
 }
 
-// setup cadance sensor reed > GND
+// setup cadence sensor reed > GND
 void setupRevSensor() {
   #if defined(USEDIRECT)
     Serial.println(" - Direct");
@@ -255,14 +254,14 @@ void setupHeaders() {
   Serial.print("RPM  KPH     KM ");
 
   #if defined(DEBUG)
-    Serial.print("-  N    T  T/N - V-IN V-PM  D-PM - PWR-M PWR-S - ");
+    Serial.print("- V-IN V-PM  D-PM - PWR-M PWR-S - ");
   #endif
 
   #if defined(USEPOWER)
-    Serial.print(" PWR ");
+    Serial.print("  PWR ");
   #endif
   
-  Serial.println(" N-W   T-W  N-C   T-C");
+  Serial.println("  N-W   T-W  N-C   T-C");
 }
 
 
@@ -481,8 +480,8 @@ void loop() {
   nMag ++;
 
 
-  // notify bluetooth client every 2 seconds
-  if (sinceNotify >= 2000) {
+  // notify bluetooth client every second
+  if (sinceNotify >= 1000) {
 
     // sleep - wake via crank reed sensor
     #if defined(USESLEEP)
@@ -511,7 +510,7 @@ void loop() {
     
     crankCount = triggerCount;
      lastCrank = lastTrigger;
-    lastCrankK = (int)( 1.0 * 1024 * lastCrank / 1000 );  // 1/1024 s granularity
+    lastCrankK = (int)( 1.0 * 1024 * lastTrigger / 1000.0 );  // 1/1024 s granularity
 
     if ( diffCrank > 0 ) {
       cadence = (int)( diffCrankCount / ( diffCrank / ( 1000*60.0 ) ) );
@@ -526,6 +525,7 @@ void loop() {
       cadence = 0;
       diffCrankTime = 0;
     }
+
 
     // speed & distance
     // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
@@ -571,14 +571,14 @@ void loop() {
     Serial.printf("%3d %4.1f %6.3f ", cadence, speed, distance);
 
     #if defined(DEBUG)
-        Serial.printf("- %2d %4d %4.0f - %4.2f %4.2f %5.1f - %5.1f %5.1f - ", diffCrankCount, diffCrank, diffCrankTime, vPIN, vPWM, dPWM, powerM, powerS);
+        Serial.printf("- %4.2f %4.2f %5.1f - %5.1f %5.1f - ", vPIN, vPWM, dPWM, powerM, powerS);
     #endif
 
     #if defined(USEPOWER)
-      Serial.printf("%4d ", power);
+      Serial.printf("%5d ", power);
     #endif
 
-    Serial.printf("%4d %5d %4d %5d ", wheelCount, lastWheelK, crankCount, lastCrankK);
+    Serial.printf("%5d %5d %4d %5d ", wheelCount, lastWheelK, crankCount, lastCrankK);
 
 
     // notify

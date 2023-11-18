@@ -1,10 +1,10 @@
 # Bluetooth Server Reebok 5.7e
 
-This is an ESP32 based bluetooth metrics server for a Reebok 5.7e indoor exercise bike based on [esp32-fmts-server](https://github.com/jamesjmtaylor/esp32-ftms-server) and [esp32-fmts-server-ic7](https://github.com/damndemento/esp32-ftms-server-ic7). Key changes to migrage from FMTS to CSC were taken from [Multi-BLE-Sensor](https://github.com/BigJinge/Multi-BLE-Sensor/tree/master). It does the following:
+This is an ESP32 based Bluetooth metrics server for a Reebok 5.7e indoor exercise bike based on [esp32-fmts-server](https://github.com/jamesjmtaylor/esp32-ftms-server) and [esp32-fmts-server-ic7](https://github.com/damndemento/esp32-ftms-server-ic7). Key changes to migrate from FMTS to CSC were taken from [Multi-BLE-Sensor](https://github.com/BigJinge/Multi-BLE-Sensor/tree/master). It does the following:
 
-1. Measures the flywheel rotation rate and resistance from the exercise bike.
+1. Measures the crank rotation rate and resistance from the exercise bike.
 1. Converts the raw measurements into key metrics such as cadence, speed, distance and power.
-1. Creates a Bluetooth server than can be connected to by a monitoring device.
+1. Creates a Bluetooth server that can be connected to by a monitoring device.
 
 The project targets the Apple Watch running watchOS 10 or later as a monitoring device.
 
@@ -16,25 +16,37 @@ The project targets the Apple Watch running watchOS 10 or later as a monitoring 
 
 
 ## Bluetooth Service
-The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service incase it is supported by future versions of watchOS.
+The forked project uses the Bluetooth [Fitness Machine Service (FMTS)](https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/) server. Specifically it uses the [Indoor Bike Data characteristic](https://www.bluetooth.com/wp-content/uploads/Sitecore-Media-Library/Gatt/Xml/Characteristics/org.bluetooth.characteristic.indoor_bike_data.xml) of the FTMS service. This service is currently not supported by my target of the Apple Watch running watchOS 10 as a monitoring device. There is a separate (untested) branch for this service in case it is supported by future versions of watchOS.
 
-This branche focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
+This branch focuses on the supported Bluetooth [Cycling Speed and Cadence (CSC) service](https://www.bluetooth.com/specifications/specs/cycling-speed-and-cadence-service-1-0/) and the [Cycling Power Service](https://www.bluetooth.com/specifications/specs/cycling-power-service-1-1/).
 
+## Reverse Engineering
+By dismantling the bike and reverse engineering the power board and the main board the general working principle of the exercise bike was determined. Cadence is measured using a reed switch, which switches a GPIO of the main MCU to ground when triggered.
+The electromagnet used for resistance is controlled by the power board. This modulates a rectified mains AC voltage supplied to the electromagnet using an PWM input. The PMW input is controlled from the main MCU GPIO via an optoisolator and opamp.
+The optoisolator output is used as an input to the opamp resulting in synchronous PMW output using a low-voltage AC signal from the power board. The main MCU is at 5V VCC.
+
+Power for the ESP32 is taken from the interface header.
+
+The reed switch is tapped for the cadence trigger at the MOSFET to the GPIO on the main board.
+A PNP transistor is used to level shift and invert the signal for digital read by the ESP32.
+
+The electro-magnet PWM control signal is tapped for resistance at the MOSFET from the GPIO main board.
+An NPN transistor is used to level shift and invert the signal for analogue read by the ESP32.
+
+Simple edge triggering is used on the reed signal, with a de-bounce delay, to count crank revolutions and crank revolution times.
+Wheel revolutions and wheel revolution times are calculated using a gear ratio and wheel size such that client displayed speed/distance matches the bikes display.
+
+Power is calculate from duty-cycle (voltage) of the electro-magnet control signal. An empirical relationship for power as a function of cadence and duty-cycle was determined.
+For fixed power and cadence the duty-cycle was measured. A simple quadratic function was sufficient to model power, with coefficients determined through non-linear fitting.
 
 ## General Use
-Although developed for my use case this code can be esily implemented for any exercise bike and other bluetooth clients. The simplist implementation would be an external reed sensor connecting GND directly to ESP32 GPIO (or an external hall sensor) using CSC mode (no USEPOWER) or estimated power (USEALTPWR) mode with appropriate trigger logic (USEDIRECT).
+Although developed for my use case this code can be easily implemented for any exercise bike and other Bluetooth clients. The simplest implementation would be an external reed sensor connecting GND directly to ESP32 GPIO (or an external hall sensor) using CSC mode (no USEPOWER) or estimated power (USEALTPWR) mode with appropriate trigger logic (USEDIRECT).
 
 Triggering using the internal hall effect sensor of the ESP32 is also implemented, but not test in-situ. Trigger threshold (HALLTRIG) and logic would need to be adjusted for specific magnet orientation and distance from sensor.
 
 
 ## Status
-Initial feature complete release. Fixing bugs
-
-### Known Bugs
-- *Spuradic Error in Cadence, Speed and Power*
-
-    Every so often unexpected very high/low cadence reported, suspect relates to integer rollover leading to excessive dT and derived properties. Difficult to log in-situ will implement InfluxDB push to log externally.
-
+Feature complete, final release.
 
 ## Roadmap
 ### Done
@@ -64,15 +76,15 @@ Initial feature complete release. Fixing bugs
 1. Calculate primary resistance metric as PWM duty-cycle (D) [100% = high resistance, 0% = no resistance]
 1. Finalise interface board [implement PWM circuit, insulation, robust physical mount]
 1. Implement sleep timer [deep sleep after inactivity, wake on crank sensor]
-1. Measure magnet duty-cycle at given cadance [80,100,120] and power [60, 100, 150, 190, 240, 280]
-1. Finalise code to report correct cadance [notify every 2 seconds]
-1. Report estimated power based on speed only [not very accutate]
+1. Measure magnet duty-cycle at given cadence [80,100,120] and power [60, 100, 150, 190, 240, 280]
+1. Finalise code to report correct cadence [notify every 2 seconds]
+1. Report estimated power based on speed only [not very accurate]
 1. Report duty-cycle as power to collect data for correlation [manual]
 1. Added crank trigger via build in hall effect sensor
 1. Added provision for simple reed trigger [GND - REED - GPIO]
-1. Reverse engineer power function: P = f(D,C) [implemented]
-1. Decide to use measured, P = f(D,C), or estimated, P = f(S), power [use measured]
+1. Reverse engineer power function: **P = f(D,C)** [implemented]
+1. Decide to use measured, **P = f(D,C)**, or estimated, **P = f(S)**, power [use measured]
+1. Fix bug relating to incorrect crank time after rollover [use lastTrigger not lastCrank to calculate lastCrankK]
+1. Fix bug relating to incorrect crank time after integer rollover [use lastTrigger to calculate lastCrankK]
 
 ### Todo
-1. Implement InfluxDB to log data to to solve bug
-1. Fix bug relating to intermittent short/long dT resulting in excessive cadance, speed and power
