@@ -11,8 +11,6 @@
 // NOTE : onboard LED indicates UART activity
 // NOTE : https://www.bluetooth.org/en-us/specification/assigned-numbers-overview
 
-// TODO : implement final power = f(cadance, resistance)
-
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -22,12 +20,12 @@
 
 
 // options
-#define USEPOWER  // create Power, Cadence & Speed insted of basic Cadence & Speed 
-//#define USEAPPROX // use approx power calculated from speed instead of measurement
-//#define USEAPCORR // use approx power correction factors APCORRF0 and APCORRF1
-#define USESLEEP  // sleep and wake via PIN_REED [USEHALL overrides]
+#define USESLEEP  // use deep sleep with PIN_REED as wake [USEHALL overrides]
+#define USEPOWER  // use power calculated emperically from cadence and electromagnet duty cycle P = f(D,C)
+//#define USEALTPWR // use alternate power calculated from speed P = f(S)
+//#define USEALTCOR // use alternate power correction factors c0 and c1
 //#define USEDIRECT // invert reed sensor logic for direct connection to GPIO ie. GND-REED-GPIO
-//#define USEHALL   // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG
+//#define USEHALL   // use ESP32 internal hall sensor as crank trigger at threshold HALLTRIG [ need to disable sleep ]
 #define DEBUG     // add debug data to serial output
 //#define DEBUG2    // add trigger events to serial output
 
@@ -38,11 +36,11 @@ const int   PIN_EMAG = 14;   // electromagnet (5V 1kHz PWM, analogue sense via N
 const float SLEEPMIN = 3.5;  // minuites on inactivity until sleep - match bike sleep of 3.5 mins
 const int   HALLTRIG = 100;  // trigger threshold for hall sensor
 
-// approx power correction factors
+// estimated power correction factors
 const float c0 = +57.03147; // offset
 const float c1 = +0.222511; // linear
 
- // emperical power function coefficients 
+// emperical power function coefficients
 const float cDD = +0.003426; // non-linear D^2
 const float cCC = -0.003840; // non-linear C^2
 const float cCD = +0.024750; // non-linear C*D
@@ -52,8 +50,9 @@ const float cO  = -105.5747; // offset
 
 
 
+// option logic
 #if defined(USEHALL)
-  #undef(USESLEEP)  // no sleep with ESP32 internal hall sensor as can not easily wake
+  #undef USESLEEP
 #endif
 
 
@@ -76,10 +75,10 @@ BLEServer *pServer;
   BLEDescriptor scControlPointDescriptor(BLEUUID((uint16_t)0x2901));
 #endif
 
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-
-bool oldState;              // crank sensor state
+bool connected = false;     //  current connection state
+bool oldConnected = false;  // previous connection state
+bool state = false;         //  current crank sensor state
+bool oldState = false;      // previous crank sensor state
 
 unsigned long lastNotify;   // time last notify
 unsigned long lastTrigger;  // time last trigger
@@ -107,11 +106,11 @@ double diffCrankTime;       // crank rotation time in ms
 // connection status
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *pServer) {
-    deviceConnected = true;
+    connected = true;
   };
 
   void onDisconnect(BLEServer *pServer) {
-    deviceConnected = false;
+    connected = false;
   }
 };
 
@@ -129,9 +128,9 @@ void setup() {
   Serial.print("  Mode : ");
   #if defined(USEPOWER)
     Serial.print("Power [CP]");
-    #if defined(USEAPPROX)
-      Serial.print(" - Approx");
-      #if defined(USEAPCORR)
+    #if defined(USEALTPWR)
+      Serial.print(" - Estimated");
+      #if defined(USEALTCOR)
         Serial.print(" [Corrected]");
       #endif
     #endif
@@ -256,7 +255,7 @@ void setupHeaders() {
   Serial.print("RPM  KPH     KM ");
 
   #if defined(DEBUG)
-    Serial.print("- d#   dT dT/# - V-IN V-PM  D-PM - PWR-M PWR-A - ");
+    Serial.print("-  N    T  T/N - V-IN V-PM  D-PM - PWR-M PWR-S - ");
   #endif
 
   #if defined(USEPOWER)
@@ -357,11 +356,11 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
   measurement[10] = (lastcrank >> 8) & 0xFF;
 
   // monitor state
-  bool disconnecting = !deviceConnected && oldDeviceConnected;
-  bool connecting = deviceConnected && !oldDeviceConnected;
+  bool disconnecting = !connected && oldConnected;
+  bool connecting = connected && !oldConnected;
 
   // notify with measurements if connected
-  if (deviceConnected) {
+  if (connected) {
     measurementCharacteristics.setValue(measurement, 11);
     measurementCharacteristics.notify();
     Serial.print(">> client");
@@ -374,12 +373,12 @@ void serviceNotifyCSC(int wheelrev, int lastwheel, int crankrev, int lastcrank) 
     Serial.println("\nClient : disconnected");
     Serial.print("Server : Advertising...");
 
-    oldDeviceConnected = deviceConnected;
+    oldConnected = connected;
   }
 
   // feature notify if connecting
   if (connecting) {
-    oldDeviceConnected = deviceConnected;
+    oldConnected = connected;
     Serial.println("\nClient : connected");
     featureCharacteristics.setValue(feature, 1);
     Serial.print("Server : set features");
@@ -412,11 +411,11 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
   measurement[13] = (lastcrank >> 8) & 0xFF;
 
   // connection state
-  bool disconnecting = !deviceConnected && oldDeviceConnected;
-  bool connecting = deviceConnected && !oldDeviceConnected;
+  bool disconnecting = !connected && oldConnected;
+  bool connecting = connected && !oldConnected;
 
   // notify with measurements if connected
-  if (deviceConnected) {
+  if (connected) {
     measurementCharacteristics.setValue(measurement, 16);
     measurementCharacteristics.notify();
     Serial.print(">> client");
@@ -428,13 +427,13 @@ void serviceNotifyCP(int power, int wheelrev, int lastwheel, int crankrev, int l
     pServer->startAdvertising();
     Serial.println("\nClient : disconnected");
     Serial.print("Server : Advertising...");
-    oldDeviceConnected = deviceConnected;
+    oldConnected = connected;
   }
 
   // feature notify if connecting
   if (connecting) {
     Serial.println("\nClient: connected");
-    oldDeviceConnected = deviceConnected;
+    oldConnected = connected;
     featureCharacteristics.setValue(feature, 1);
     Serial.print("Server : set features");
   }
@@ -449,7 +448,6 @@ void loop() {
 
   // count crank revolutions
   unsigned long sinceTrigger = millis() - lastTrigger;  // ms since last trigger
-  bool state;
   bool edge;
 
   #if defined(USEHALL)
@@ -511,7 +509,6 @@ void loop() {
     uint16_t diffCrankCount = triggerCount - lastCrankCount;
     uint16_t diffCrank = lastTrigger - lastCrank;
     
-
     crankCount = triggerCount;
      lastCrank = lastTrigger;
     lastCrankK = (int)( 1.0 * 1024 * lastCrank / 1000 );  // 1/1024 s granularity
@@ -530,10 +527,14 @@ void loop() {
       diffCrankTime = 0;
     }
 
-    // wheel rev
+    // speed & distance
     // NOTE : based on Apple Watch default wheel dimension 700c x 2.5mm
     // NOTE : 3 is theoretical crank:wheel gear ratio 
+    // NOTE : 2.13 is circumference of 700c in meters
+
     wheelCount = crankCount * 3;
+         speed = cadence * 3 * 2.13 * 60 / 1000;
+      distance = wheelCount * 2.13 / 1000;
 
     #if defined(USEPOWER)
       lastWheelK = lastCrankK * 2;  // 1/2048 s granularity
@@ -541,18 +542,13 @@ void loop() {
       lastWheelK = lastCrankK * 1;  // 1/1024 s granularity
     #endif
 
-    // speed, distance & power (approx)
-    // NOTE : 2.13 m is circumference of 700c
-       speed = cadence * 3 * 2.13 * 60 / 1000;
-    distance = wheelCount * 2.13 / 1000;
-
-    #if defined(USEAPCORR)
+    // power
+    #if defined(USEALTCOR)
       powerS = powerFromSpeed(speed) * c1 + c0;
     #else
       powerS = powerFromSpeed(speed);
     #endif
 
-    // power (measured)
     double aMag = sMag/nMag;
     double vPIN = 3.3 * aMag/4095;
     double vPWM = 5.0 - (5.0 * aMag/4095);
@@ -564,8 +560,7 @@ void loop() {
       powerM = 0;
     }
 
-    // power reported
-    #if defined(USEAPPROX)
+    #if defined(USEALTPWR)
       power = (int)( powerS + 0.5 );
     #else
       power = (int)( powerM + 0.5 );

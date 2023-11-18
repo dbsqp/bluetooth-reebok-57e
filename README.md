@@ -24,7 +24,11 @@ Although developed for my use case this code can be esily implemented for any ex
 I also implemented crank triggering using the internal hall sensor of the ESP32 but did not test in-situ so trigger threshold (HALLTRIG) and logic would need to be adjusted.
 
 ## Status
-Working, under developement.
+Working! Bug fixing
+
+### Known Bugs
+- Spuradic error in cadence, speed and power
+  Every so often unexpected very high/low cadence reported, suspect relates to integer rollover leading to excessive dT and derived properties. Difficult to log in-situ will implement InfluxDB push to log externally.
 
 ## Roadmap
 ### Done
@@ -52,15 +56,17 @@ Working, under developement.
 1. Assess power on/off with bike computer [programming header always powered]
 1. Create prototype interface circuit from PMW signal to ESP32 [TIP120 NPN, base to PWM]
 1. Calculate primary resistance metric as PWM duty-cycle (D) [100% = high resistance, 0% = no resistance]
-1. finalise interface board [implement PWM circuit, insulation, robust physical mount]
+1. Finalise interface board [implement PWM circuit, insulation, robust physical mount]
 1. Implement sleep timer [deep sleep after inactivity, wake on crank sensor]
 1. Measure magnet duty-cycle at given cadance [80,100,120] and power [60, 100, 150, 190, 240, 280]
 1. Finalise code to report correct cadance [notify every 2 seconds]
-1. Report approx power based on speed and terminal velocity [not very accutate]
+1. Report estimated power based on speed only [not very accutate]
 1. Report duty-cycle as power to collect data for correlation [manual]
 1. Added crank trigger via build in hall effect sensor
 1. Added provision for simple reed trigger [GND - REED - GPIO]
 1. Reverse engineer power function: P = f(D,C) [implemented]
+1. Decide to use measured, P = f(D,C), or estimated, P = f(S), power [use measured]
 
 ### Todo
-1. Decide to use f(C,D) or approximation for power [use as approx way off]
+1. Implement InfluxDB to log data to to solve bug
+1. Fix bug relating to intermittent short/long dT resulting in excessive cadance, speed and power
