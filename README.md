@@ -39,6 +39,8 @@ Wheel revolutions and wheel revolution times are calculated using a gear ratio a
 Power is calculate from duty-cycle (voltage) of the electro-magnet control signal. An empirical relationship for power as a function of cadence and duty-cycle was determined.
 For fixed power and cadence the duty-cycle was measured. A simple quadratic function was sufficient to model power, with coefficients determined through non-linear fitting.
 
+<img src="https://github.com/dbsqp/bluetooth-reebok-57e/blob/AppleWatch-branch/documentation/interface-final.jpeg?raw=true" />
+
 ## General Use
 Although developed for my use case this code can be easily implemented for any exercise bike and other Bluetooth clients. The simplest implementation would be an external reed sensor connecting GND directly to ESP32 GPIO (or an external hall sensor) using CSC mode (no USEPOWER) or estimated power (USEALTPWR) mode with appropriate trigger logic (USEDIRECT).
 
@@ -80,11 +82,10 @@ Feature complete, final release.
 1. Finalise code to report correct cadence [notify every 2 seconds]
 1. Report estimated power based on speed only [not very accurate]
 1. Report duty-cycle as power to collect data for correlation [manual]
-1. Added crank trigger via build in hall effect sensor
+1. Added crank trigger via build in hall effect sensor [because its there]
 1. Added provision for simple reed trigger [GND - REED - GPIO]
-1. Reverse engineer power function: **P = f(D,C)** [implemented]
-1. Decide to use measured, **P = f(D,C)**, or estimated, **P = f(S)**, power [use measured]
-1. Fix bug relating to incorrect crank time after rollover [use lastTrigger not lastCrank to calculate lastCrankK]
+1. Reverse engineer power function: *P = f(D,C)* [implemented]
+1. Decide to use measured, *P = f(D,C)*, or estimated, *P = f(S)*, power [use measured]
 1. Fix bug relating to incorrect crank time after integer rollover [use lastTrigger to calculate lastCrankK]
 
 ### Todo
